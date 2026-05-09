@@ -29,4 +29,4 @@ play_button = ctk.CTkButton(
 )
 play_button.pack(pady=20)
 
-app.mainloop()
+app.mainloop("hola")
