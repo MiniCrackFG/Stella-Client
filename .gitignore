@@ -1,10 +1,24 @@
 # Python
-venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# VSCode
-.vscode/
+# Virtualenv
+venv/
 
-# Linux
+# Logs
+logs/
 *.log
+*.log.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Minecraft runtime
+.minecraft/
