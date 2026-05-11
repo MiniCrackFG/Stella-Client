@@ -38,8 +38,10 @@ def update_playing():
     if rpc_instance:
         try:
             rpc_instance.update(
+                name="Stella Client",
                 state="Stella Client",
                 details="Playing Minecraft",
+                large_image="stella_client",
                 large_text="Stella Client",
                 start=time.time()
             )
@@ -54,8 +56,10 @@ def update_menu():
     if rpc_instance:
         try:
             rpc_instance.update(
+                name="Stella Client",
                 state="Stella Client",
                 details="In Main Menu",
+                large_image="stella_client",
                 large_text="Stella Client",
                 start=time.time()
             )
@@ -69,6 +73,11 @@ def close_rpc():
     global rpc_instance
     if rpc_instance:
         try:
+            # Primero clear la actividad
+            rpc_instance.clear()
+            # Esperar 0.5 segundos para que Discord procese
+            time.sleep(0.5)
+            # Luego cierra la conexión
             rpc_instance.close()
             print("✓ [Discord RPC] Disconnected")
         except Exception as e:

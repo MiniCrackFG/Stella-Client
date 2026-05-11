@@ -223,6 +223,43 @@ def set_version(version):
     save_settings(settings)
     return version
 
+def get_compatible_version_for_mods():
+    """Determine the best Minecraft version for installed mods"""
+    mods_dir = os.path.join(MINECRAFT_DIR, "mods")
+    if not os.path.exists(mods_dir):
+        return None
+    
+    # Check installed mods for version requirements
+    compatible_versions = []
+    for filename in os.listdir(mods_dir):
+        if filename.endswith('.jar'):
+            # Extract version from filename (basic heuristic)
+            if 'mc1.20.1' in filename or '1.20.1' in filename:
+                compatible_versions.append("1.20.1")
+            elif 'mc1.21' in filename or '1.21' in filename:
+                # Extract specific version
+                if '1.21.11' in filename:
+                    compatible_versions.append("1.21.11")
+                elif '1.21.10' in filename:
+                    compatible_versions.append("1.21.10")
+                elif '1.21.9' in filename:
+                    compatible_versions.append("1.21.9")
+                else:
+                    compatible_versions.append("1.21.11")  # Default to latest
+    
+    if compatible_versions:
+        # For mod compatibility, we need the LOWEST version that satisfies all mods
+        # since mods are typically backward compatible but not forward compatible
+        # Sort versions and return the lowest one
+        def version_key(v):
+            parts = v.split('.')
+            return [int(x) for x in parts]
+        
+        compatible_versions.sort(key=version_key)
+        return compatible_versions[0]  # Return lowest version
+    
+    return None
+
 def launch_minecraft():
     # 1. Cargar configuración
     settings = load_settings()
@@ -230,19 +267,46 @@ def launch_minecraft():
     ram_argument = f"-Xmx{settings['ram']}G"
 
     print(f"--- Iniciando Stella Client ---")
-    print(f"Versión: {version}")
+    print(f"Versión configurada: {version}")
     print(f"Asignando: {ram_argument}")
 
     # 2. Asegurar que el directorio existe
     if not os.path.exists(MINECRAFT_DIR):
         os.makedirs(MINECRAFT_DIR, exist_ok=True)
 
-    # 3. Instalar la versión (si no existe)
-    print(f"Verificando instalación de {version}...")
-    minecraft_launcher_lib.install.install_minecraft_version(
-        version,
-        MINECRAFT_DIR
-    )
+    # 3. Verificar si hay mods instalados
+    mods_dir = os.path.join(MINECRAFT_DIR, "mods")
+    has_mods = os.path.exists(mods_dir) and len([f for f in os.listdir(mods_dir) if f.endswith('.jar')]) > 0
+
+    if has_mods:
+        print("Mods detectados - verificando compatibilidad...")
+        
+        # Check if current version is compatible with mods
+        compatible_version = get_compatible_version_for_mods()
+        if compatible_version and compatible_version != version:
+            print(f"⚠️  Cambiando versión a {compatible_version} para compatibilidad con mods")
+            print("⚠️  IMPORTANTE: Re-descarga los mods desde el menú de mods para la nueva versión")
+            version = compatible_version
+            # Update settings
+            settings["version"] = version
+            save_settings(settings)
+        
+        print(f"Instalando Fabric para {version}...")
+        try:
+            minecraft_launcher_lib.fabric.install_fabric(version, MINECRAFT_DIR)
+            print("✓ Fabric instalado correctamente")
+        except Exception as e:
+            print(f"Error instalando Fabric: {e}")
+            # Fallback a vanilla si Fabric falla
+            has_mods = False
+
+    if not has_mods:
+        # Instalar versión vanilla
+        print(f"Instalando Minecraft {version} (vanilla)...")
+        minecraft_launcher_lib.install.install_minecraft_version(
+            version,
+            MINECRAFT_DIR
+        )
 
     # 4. Verificar autenticación
     auth = load_auth()
@@ -266,11 +330,24 @@ def launch_minecraft():
         }
 
     # 5. Generar el comando de ejecución
-    command = minecraft_launcher_lib.command.get_minecraft_command(
-        version,
-        MINECRAFT_DIR,
-        options
-    )
+    if has_mods:
+        # Usar versión de Fabric (el nombre que crea Fabric)
+        loader_version = minecraft_launcher_lib.fabric.get_latest_loader_version()
+        fabric_version = f"fabric-loader-{loader_version}-{version}"
+        print(f"Lanzando con Fabric (con mods) - versión: {fabric_version}...")
+        command = minecraft_launcher_lib.command.get_minecraft_command(
+            fabric_version,
+            MINECRAFT_DIR,
+            options
+        )
+    else:
+        # Usar comando vanilla
+        print("Lanzando vanilla...")
+        command = minecraft_launcher_lib.command.get_minecraft_command(
+            version,
+            MINECRAFT_DIR,
+            options
+        )
 
     # 6. Ejecutar el juego
     print("Lanzando proceso...")
