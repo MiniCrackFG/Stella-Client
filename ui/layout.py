@@ -2,6 +2,85 @@ import threading
 import launcher.minecraft as minecraft
 import launcher.discord_rpc as discord_rpc
 import customtkinter as ctk
+import time
+import requests
+import os
+
+def do_login_poll(device_info, account_window, status_label, code_display):
+    import minecraft_launcher_lib.microsoft_account as ma
+
+    device_code = device_info.get("device_code", "")
+    interval = device_info.get("interval", 5)
+    max_attempts = 120
+    attempt = 0
+
+    status_label.configure(text="Esperando autorización... (puede tomar 1-2 minutos)")
+
+    while attempt < max_attempts:
+        time.sleep(interval)
+        attempt += 1
+
+        token_data = {
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "client_id": "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb",
+            "device_code": device_code
+        }
+
+        resp = requests.post(
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+            data=token_data
+        )
+
+        if resp.status_code == 200:
+            status_label.configure(text="¡Token recibido!", text_color="white")
+            tokens = resp.json()
+            break
+        elif resp.status_code != 400:
+            status_label.configure(text=f"Error: {resp.status_code}", text_color="red")
+            return
+
+        error_data = resp.json()
+        error = error_data.get("error", "")
+        if error == "authorization_pending":
+            if attempt % 6 == 0:
+                status_label.configure(text=f"Esperando... ({attempt * interval}s)", text_color="yellow")
+        elif error in ["authorization_declined", "expired_token"]:
+            status_label.configure(text=f"Error: {error}", text_color="red")
+            return
+        elif error == "slow_down":
+            interval += 1
+
+    if attempt >= max_attempts:
+        status_label.configure(text="Tiempo de espera agotado", text_color="red")
+        return
+
+    try:
+        access_token = tokens["access_token"]
+
+        xbl_data = ma.authenticate_with_xbl(access_token)
+        display_claims = xbl_data.get("DisplayClaims", {})
+        xui = display_claims.get("xui", [{}])[0]
+        userhash = xui.get("uhs", "")
+
+        xsts_data = ma.authenticate_with_xsts(xbl_data["Token"])
+        mc_data = ma.authenticate_with_minecraft(userhash, xsts_data["Token"])
+        profile = ma.get_profile(mc_data["access_token"])
+
+        minecraft.save_auth({
+            "access_token": access_token,
+            "refresh_token": tokens.get("refresh_token", ""),
+            "xbl_token": xbl_data["Token"],
+            "xsts_token": xsts_data["Token"],
+            "mc_access_token": mc_data["access_token"],
+            "uuid": profile["id"],
+            "username": profile["name"],
+        })
+
+        status_label.configure(text=f"✓ Logueado como {profile['name']}", text_color="#00FF00")
+        account_window.after(2000, account_window.destroy)
+
+    except Exception as e:
+        status_label.configure(text=f"Error: {str(e)}", text_color="red")
 
 def start_ui():
     ctk.set_appearance_mode("dark")
@@ -10,59 +89,103 @@ def start_ui():
     app = ctk.CTk()
     app.title("Stella Client")
     app.geometry("900x500")
+    app.configure(fg_color="#111111")
 
-    # Colores Modrinth
+    # Crear fuente Comic Neue para usar en CustomTkinter
+    FONT_MAIN = ctk.CTkFont(family="Comic Neue", size=16)
+    FONT_BOLD = ctk.CTkFont(family="Comic Neue", size=18, weight="bold")
+    FONT_LARGE = ctk.CTkFont(family="Comic Neue", size=36, weight="bold")
+    FONT_TITLE = ctk.CTkFont(family="Comic Neue", size=48, weight="bold")
+    print("✓ Fuente Comic Neue configurada")
+
+    # Colores
     BG_COLOR = "#1C1C1C"
     SIDEBAR_BG = "#262626"
-    ACCENT_GREEN = "#2E7D32"
+    ACCENT_GREEN = "#00FF00"
 
     def open_account():
+        print("Abriendo ventana de cuenta...")
         account_window = ctk.CTkToplevel(app)
         account_window.title("Account")
-        account_window.geometry("600x400")
+        account_window.geometry("600x500")
         account_window.after(10, account_window.lift)
-        account_window.configure(fg_color=BG_COLOR)
+        account_window.configure(fg_color="#2b2b2b")
 
-        # Header
-        header_frame = ctk.CTkFrame(account_window, fg_color=SIDEBAR_BG, corner_radius=0)
-        header_frame.pack(fill="x", pady=(0, 20))
+        header_frame = ctk.CTkFrame(account_window, fg_color="#1a1a1a", corner_radius=0)
+        header_frame.pack(fill="x", pady=(0, 10))
 
-        ctk.CTkLabel(header_frame, text="👤  Account", font=("Arial", 20, "bold")).pack(pady=20, padx=20, anchor="w")
+        ctk.CTkLabel(header_frame, text="👤  Account", font=("Arial", 20, "bold"), text_color="white").pack(pady=15, padx=20, anchor="w")
 
-        # Content
-        content_frame = ctk.CTkFrame(account_window, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=30, pady=20)
+        content_frame = ctk.CTkFrame(account_window, fg_color="#2b2b2b")
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Username section
-        ctk.CTkLabel(content_frame, text="Username", font=("Arial", 16, "bold")).pack(anchor="w")
-        settings = minecraft.load_settings()
-        username_var = ctk.StringVar(value=settings.get("username", "mini"))
-        username_entry = ctk.CTkEntry(content_frame, textvariable=username_var)
-        username_entry.pack(fill="x", pady=(5, 20))
+        # Verificar si ya está logueado
+        current_user = minecraft.get_current_user()
 
-        # Save button
-        def save_account():
-            settings = minecraft.load_settings()
-            settings["username"] = username_var.get()
-            minecraft.save_settings(settings)
-            ctk.CTkLabel(content_frame, text="✓ Saved successfully!", text_color=ACCENT_GREEN, font=("Arial", 12)).pack(pady=(10, 0))
+        if current_user:
+            # Mostrar info de la cuenta
+            ctk.CTkLabel(content_frame, text="✓ CUENTA PREMIUM", font=("Arial", 14, "bold"), text_color=ACCENT_GREEN).pack(anchor="w", pady=(10, 5))
 
-        save_btn = ctk.CTkButton(
-            content_frame,
-            text="Save Changes",
-            fg_color=ACCENT_GREEN,
-            hover_color="#1B5E20",
-            command=save_account
-        )
-        save_btn.pack(pady=20)
+            auth_data = minecraft.load_auth()
+            ctk.CTkLabel(content_frame, text=f"Usuario: {current_user}", font=("Arial", 16, "bold"), text_color="white").pack(anchor="w", pady=5)
 
-        # Placeholder info
-        ctk.CTkLabel(
-            content_frame,
-            text="Profile features coming soon...",
-            font=("Arial", 12),
-            text_color="gray"
-        ).pack(anchor="w", pady=(20, 0))
+            uuid = auth_data.get("uuid", "N/A") if auth_data else "N/A"
+            ctk.CTkLabel(content_frame, text=f"UUID: {uuid}", font=("Arial", 12), text_color="#888888").pack(anchor="w", pady=2)
+
+            ctk.CTkLabel(content_frame, text="Puedes jugar con tu cuenta premium ahora.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(15, 20))
+
+            def logout():
+                minecraft.logout()
+                account_window.destroy()
+                open_account()
+
+            ctk.CTkButton(
+                content_frame,
+                text="Cerrar Sesión",
+                fg_color="#c42b1c",
+                hover_color="#8b1e14",
+                text_color="white",
+                command=logout,
+                height=40
+            ).pack(pady=20, padx=20, fill="x")
+
+        else:
+            # Mostrar opciones de login
+            ctk.CTkLabel(content_frame, text="Iniciar Sesión", font=("Arial", 18, "bold"), text_color="white").pack(anchor="w", pady=(10, 5))
+            ctk.CTkLabel(content_frame, text="Inicia sesión con tu cuenta de Microsoft para jugar con tu cuenta premium.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(0, 15))
+
+            status_label = ctk.CTkLabel(content_frame, text="", font=("Arial", 12), text_color="white")
+            status_label.pack(pady=5)
+
+            code_display = ctk.CTkLabel(content_frame, text="---", font=("Arial", 28, "bold"), text_color=ACCENT_GREEN)
+            code_display.pack(pady=10)
+
+            def start_login():
+                try:
+                    status_label.configure(text="Obteniendo código...")
+                    device_info = minecraft.get_device_code_info()
+                    code_display.configure(text=device_info.get("user_code", "Error"))
+                    status_label.configure(text="Ingresa este código en el navegador y espera...")
+
+                    import webbrowser
+                    webbrowser.open(device_info.get("verification_uri", ""))
+
+                    threading.Thread(target=do_login_poll, args=(device_info, account_window, status_label, code_display), daemon=True).start()
+                except Exception as e:
+                    status_label.configure(text=f"Error: {str(e)}", text_color="red")
+
+            ctk.CTkButton(
+                content_frame,
+                text="► Iniciar Sesión con Microsoft",
+                fg_color=ACCENT_GREEN,
+                hover_color="#00cc00",
+                text_color="black",
+                command=start_login,
+                height=50,
+                font=("Arial", 16, "bold")
+            ).pack(pady=20, padx=20, fill="x")
+
+        # Fin de open_account
 
     def open_mods():
         mods_window = ctk.CTkToplevel(app)
@@ -265,14 +388,21 @@ def start_ui():
     title_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(50, 20), padx=20)
     title_frame.grid_columnconfigure(0, weight=1)
 
-    title_label = ctk.CTkLabel(title_frame, text="Stella Client", font=("Arial", 32, "bold"))
+    title_label = ctk.CTkLabel(title_frame, text="Stella Client", font=FONT_TITLE)
     title_label.grid(row=0, column=0, sticky="w")
+
+    current_user = minecraft.get_current_user()
+    if current_user:
+        account_btn_text = f"👤 {current_user[:12]}"
+    else:
+        account_btn_text = "👤 Account"
 
     account_btn = ctk.CTkButton(
         title_frame,
-        text="👤 Account",
-        width=120,
+        text=account_btn_text,
+        width=140,
         height=40,
+        font=FONT_MAIN,
         command=open_account
     )
     account_btn.grid(row=0, column=1, sticky="e")
@@ -297,9 +427,9 @@ def start_ui():
     play_btn = ctk.CTkButton(
         play_frame,
         text="▶  Play",
-        font=("Arial", 24, "bold"),
-        height=60,
-        width=200,
+        font=FONT_LARGE,
+        height=70,
+        width=220,
         fg_color="#2E7D32",
         hover_color="#1B5E20",
         command=launch_game
@@ -312,14 +442,14 @@ def start_ui():
 
     available_versions = minecraft.get_available_versions()
     current_version = minecraft.load_settings()["version"]
-    
+
     version_dropdown = ctk.CTkOptionMenu(
         play_frame,
         values=available_versions,
         command=on_version_change,
-        button_color=ACCENT_GREEN,
-        button_hover_color="#1B5E20",
-        text_color="gray"
+        button_color="#3a3a3a",
+        button_hover_color="#4a4a4a",
+        text_color="white"
     )
     version_dropdown.set(current_version)
     version_dropdown.grid(row=0, column=1, sticky="e", padx=(10, 0))
@@ -336,6 +466,7 @@ def start_ui():
         text="📦 Mods",
         width=120,
         height=40,
+        font=FONT_MAIN,
         command=open_mods
     )
     mods_btn.pack(pady=(0, 10))
@@ -343,6 +474,7 @@ def start_ui():
     settings_btn = ctk.CTkButton(
         buttons_stack,
         text="⚙ Settings",
+        font=FONT_MAIN,
         width=120,
         height=40,
         command=open_settings
@@ -365,7 +497,18 @@ def start_ui():
 
     # Close RPC on app close
     def on_closing():
+        # Cerrar todas las ventanas primero
+        for widget in app.winfo_children():
+            if isinstance(widget, ctk.CTkToplevel):
+                try:
+                    widget.destroy()
+                except:
+                    pass
+
+        # Cerrar RPC y esperar un poco
         discord_rpc.close_rpc()
+        time.sleep(0.5)
+
         app.destroy()
 
     app.protocol("WM_DELETE_WINDOW", on_closing)
