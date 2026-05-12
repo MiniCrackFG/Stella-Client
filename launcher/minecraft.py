@@ -124,12 +124,17 @@ def complete_login_with_browser(callback_url, state, code_verifier):
         return None
 
 def logout():
-    """Cierra la sesión."""
+    """Cierra la sesión premium y limpia cuenta offline."""
     if os.path.exists(AUTH_FILE):
         os.remove(AUTH_FILE)
+    clear_offline_account()
+
+def login_offline(username):
+    """Guarda un nombre de usuario para modo offline."""
     settings = load_settings()
-    settings["username"] = "mini"
+    settings["username"] = username
     save_settings(settings)
+    return username
 
 class OAuthCallbackHandler(http.server.SimpleHTTPRequestHandler):
     """Handler para el callback de OAuth."""
@@ -171,11 +176,30 @@ def login_with_microsoft(callback=None):
     return None
 
 def get_current_user():
-    """Retorna el usuario actual logueado."""
+    """Retorna el usuario actual (premium u offline)."""
     auth = load_auth()
     if auth and "username" in auth:
         return auth["username"]
+    settings = load_settings()
+    if settings.get("username") and settings.get("username") != "mini":
+        return settings["username"]
     return None
+
+def get_offline_username():
+    """Retorna el username offline guardado."""
+    settings = load_settings()
+    return settings.get("username", "Player")
+
+def has_offline_account():
+    """Verifica si hay cuenta offline configurada."""
+    settings = load_settings()
+    return settings.get("username", "mini") != "mini" and not is_logged_in()
+
+def clear_offline_account():
+    """Limpia la cuenta offline."""
+    settings = load_settings()
+    settings["username"] = "mini"
+    save_settings(settings)
 
 def complete_login_with_browser_from_url(callback_url):
     """Completa el login usando la URL que pegó el usuario."""
