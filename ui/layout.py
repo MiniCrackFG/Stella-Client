@@ -1,7 +1,7 @@
 import threading
 import time
+
 import requests
-import webbrowser
 import launcher.minecraft as minecraft
 import launcher.discord_rpc as discord_rpc
 import launcher.mods as mods
@@ -33,6 +33,7 @@ def start_ui():
 
     def do_login_poll(device_info, account_window, status_label, code_display):
         import minecraft_launcher_lib.microsoft_account as ma
+        import webbrowser
 
         device_code = device_info.get("device_code", "")
         interval = device_info.get("interval", 5)
@@ -113,21 +114,20 @@ def start_ui():
         header_frame = ctk.CTkFrame(account_window, fg_color="#1a1a1a", corner_radius=0)
         header_frame.pack(fill="x", pady=(0, 10))
 
-        ctk.CTkLabel(header_frame, text="👤  Account", font=("Comic Neue", 20, "bold"), text_color="white").pack(pady=15, padx=20, anchor="w")
+        ctk.CTkLabel(header_frame, text="👤  Account", font=("Arial", 20, "bold"), text_color="white").pack(pady=15, padx=20, anchor="w")
 
         content_frame = ctk.CTkFrame(account_window, fg_color="#2b2b2b")
         content_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
         current_user = minecraft.get_current_user()
-        offline_user = minecraft.get_offline_username()
 
         if current_user:
-            ctk.CTkLabel(content_frame, text="✓ CUENTA PREMIUM", font=("Comic Neue", 14, "bold"), text_color="#00FF00").pack(anchor="w", pady=(10, 5))
+            ctk.CTkLabel(content_frame, text="✓ CUENTA PREMIUM", font=("Arial", 14, "bold"), text_color="#00FF00").pack(anchor="w", pady=(10, 5))
             auth_data = minecraft.load_auth()
-            ctk.CTkLabel(content_frame, text=f"Usuario: {current_user}", font=("Comic Neue", 16, "bold"), text_color="white").pack(anchor="w", pady=5)
+            ctk.CTkLabel(content_frame, text=f"Usuario: {current_user}", font=("Arial", 16, "bold"), text_color="white").pack(anchor="w", pady=5)
             uuid = auth_data.get("uuid", "N/A") if auth_data else "N/A"
-            ctk.CTkLabel(content_frame, text=f"UUID: {uuid}", font=("Comic Neue", 12), text_color="#888888").pack(anchor="w", pady=2)
-            ctk.CTkLabel(content_frame, text="Puedes jugar con tu cuenta premium ahora.", font=("Comic Neue", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(15, 20))
+            ctk.CTkLabel(content_frame, text=f"UUID: {uuid}", font=("Arial", 12), text_color="#888888").pack(anchor="w", pady=2)
+            ctk.CTkLabel(content_frame, text="Puedes jugar con tu cuenta premium ahora.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(15, 20))
 
             def logout():
                 minecraft.logout()
@@ -135,54 +135,14 @@ def start_ui():
                 open_account()
 
             ctk.CTkButton(content_frame, text="Cerrar Sesión", fg_color="#c42b1c", hover_color="#8b1e14", text_color="white", command=logout, height=40).pack(pady=20, padx=20, fill="x")
-        elif offline_user and offline_user != "mini":
-            ctk.CTkLabel(content_frame, text="☁ MODO OFFLINE", font=("Comic Neue", 14, "bold"), text_color="#4A8FBF").pack(anchor="w", pady=(10, 5))
-            ctk.CTkLabel(content_frame, text=f"Usuario: {offline_user}", font=("Comic Neue", 16, "bold"), text_color="white").pack(anchor="w", pady=5)
-            ctk.CTkLabel(content_frame, text="Usando nombre de usuario offline.", font=("Comic Neue", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(15, 20))
-
-            def logout_offline():
-                minecraft.clear_offline_account()
-                account_window.destroy()
-                open_account()
-
-            ctk.CTkButton(content_frame, text="Cambiar Usuario", fg_color=ACCENT_BLUE, hover_color="#0d3553", text_color="white", command=logout_offline, height=40).pack(pady=20, padx=20, fill="x")
         else:
-            ctk.CTkLabel(content_frame, text="Iniciar Sesión", font=("Comic Neue", 18, "bold"), text_color="white").pack(anchor="w", pady=(10, 5))
-            ctk.CTkLabel(content_frame, text="Inicia sesión con tu cuenta de Microsoft o juega en modo offline.", font=("Comic Neue", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(0, 15))
+            ctk.CTkLabel(content_frame, text="Iniciar Sesión", font=("Arial", 18, "bold"), text_color="white").pack(anchor="w", pady=(10, 5))
+            ctk.CTkLabel(content_frame, text="Inicia sesión con tu cuenta de Microsoft para jugar con tu cuenta premium.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(0, 15))
 
-            offline_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-            offline_frame.pack(fill="x", pady=(0, 15))
-
-            ctk.CTkLabel(offline_frame, text="Nombre de usuario:", font=("Comic Neue", 12, "bold")).pack(side="left", padx=(0, 10))
-            offline_name_var = ctk.StringVar(value="Player")
-            offline_entry = ctk.CTkEntry(offline_frame, textvariable=offline_name_var, width=200)
-            offline_entry.pack(side="left", padx=(0, 10))
-
-            def do_offline_login():
-                username = offline_name_var.get().strip()
-                if username:
-                    minecraft.login_offline(username)
-                    try:
-                        account_window.destroy()
-                    except:
-                        pass
-                    open_account()
-                    try:
-                        app.destroy()
-                    except:
-                        pass
-
-            ctk.CTkButton(offline_frame, text="Jugar Offline", fg_color=ACCENT_BLUE, hover_color="#0d3553", command=do_offline_login, width=120).pack(side="left")
-
-            separator = ctk.CTkFrame(content_frame, fg_color="#444444", height=1)
-            separator.pack(fill="x", pady=15)
-
-            ctk.CTkLabel(content_frame, text="O inicia sesión con Microsoft:", font=("Comic Neue", 12), text_color="gray").pack(anchor="w")
-
-            status_label = ctk.CTkLabel(content_frame, text="", font=("Comic Neue", 12), text_color="white")
+            status_label = ctk.CTkLabel(content_frame, text="", font=("Arial", 12), text_color="white")
             status_label.pack(pady=5)
 
-            code_display = ctk.CTkLabel(content_frame, text="---", font=("Comic Neue", 28, "bold"), text_color="#4A8FBF")
+            code_display = ctk.CTkLabel(content_frame, text="---", font=("Arial", 28, "bold"), text_color="#00FF00")
             code_display.pack(pady=10)
 
             def start_login():
@@ -192,13 +152,14 @@ def start_ui():
                     code_display.configure(text=device_info.get("user_code", "Error"))
                     status_label.configure(text="Ingresa este código en el navegador y espera...")
 
+                    import webbrowser
                     webbrowser.open(device_info.get("verification_uri", ""))
 
                     threading.Thread(target=do_login_poll, args=(device_info, account_window, status_label, code_display), daemon=True).start()
                 except Exception as e:
                     status_label.configure(text=f"Error: {str(e)}", text_color="red")
 
-            ctk.CTkButton(content_frame, text="► Iniciar Sesión con Microsoft", fg_color=ACCENT_BLUE_LIGHT, hover_color="#3a7f9f", text_color="white", command=start_login, height=50, font=("Comic Neue", 16, "bold")).pack(pady=20, padx=20, fill="x")
+            ctk.CTkButton(content_frame, text="► Iniciar Sesión con Microsoft", fg_color="#00FF00", hover_color="#00cc00", text_color="black", command=start_login, height=50, font=("Arial", 16, "bold")).pack(pady=20, padx=20, fill="x")
 
     def open_browse_mods(parent_window=None):
         """Open the browse mods window to search for and download mods"""
@@ -212,20 +173,20 @@ def start_ui():
         header_frame = ctk.CTkFrame(browse_window, fg_color=SIDEBAR_BG, corner_radius=0)
         header_frame.pack(fill="x", pady=(0, 15))
 
-        ctk.CTkLabel(header_frame, text="🔍  Browse Mods", font=("Comic Neue", 20, "bold")).pack(pady=15, padx=20, anchor="w")
+        ctk.CTkLabel(header_frame, text="🔍  Browse Mods", font=("Arial", 20, "bold")).pack(pady=15, padx=20, anchor="w")
 
         # Controls frame (search, version, source)
         controls_frame = ctk.CTkFrame(browse_window, fg_color="transparent")
         controls_frame.pack(fill="x", padx=30, pady=10)
 
         # Search bar
-        ctk.CTkLabel(controls_frame, text="Search:", font=("Comic Neue", 12, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ctk.CTkLabel(controls_frame, text="Search:", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10))
         search_var = ctk.StringVar()
         search_entry = ctk.CTkEntry(controls_frame, textvariable=search_var, placeholder_text="Search mods...", width=300)
         search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 20))
 
         # Version selector
-        ctk.CTkLabel(controls_frame, text="Version:", font=("Comic Neue", 12, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 10))
+        ctk.CTkLabel(controls_frame, text="Version:", font=("Arial", 12, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 10))
         current_version = minecraft.load_settings()["version"]
         available_versions = minecraft.get_available_versions()
         version_dropdown = ctk.CTkOptionMenu(
@@ -241,7 +202,7 @@ def start_ui():
         version_dropdown.grid(row=0, column=3, sticky="w", padx=(0, 20))
 
         # Source selector
-        ctk.CTkLabel(controls_frame, text="Source:", font=("Comic Neue", 12, "bold")).grid(row=0, column=4, sticky="w", padx=(0, 10))
+        ctk.CTkLabel(controls_frame, text="Source:", font=("Arial", 12, "bold")).grid(row=0, column=4, sticky="w", padx=(0, 10))
         source_var = ctk.StringVar(value="modrinth")
         source_dropdown = ctk.CTkOptionMenu(
             controls_frame,
@@ -273,7 +234,7 @@ def start_ui():
                 widget.destroy()
 
             if not mod_list:
-                ctk.CTkLabel(scrollable_frame, text="No mods found. Try a different search.", text_color="gray", font=("Comic Neue", 12)).pack(pady=20)
+                ctk.CTkLabel(scrollable_frame, text="No mods found. Try a different search.", text_color="gray", font=("Arial", 12)).pack(pady=20)
                 return
 
             for mod in mod_list:
@@ -284,14 +245,14 @@ def start_ui():
                 info_frame = ctk.CTkFrame(mod_card, fg_color="transparent")
                 info_frame.pack(fill="x", expand=True, padx=15, pady=10, side="left")
 
-                mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Comic Neue", 14, "bold"))
+                mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Arial", 14, "bold"))
                 mod_name.pack(anchor="w")
 
-                mod_desc = ctk.CTkLabel(info_frame, text=mod.get("description", "")[:100] + "...", text_color="gray", font=("Comic Neue", 10))
+                mod_desc = ctk.CTkLabel(info_frame, text=mod.get("description", "")[:100] + "...", text_color="gray", font=("Arial", 10))
                 mod_desc.pack(anchor="w", pady=(2, 0))
 
                 mod_info = f"Version: {mod.get('version', 'N/A')} | Downloads: {mod.get('downloads', 0)}"
-                mod_info_label = ctk.CTkLabel(info_frame, text=mod_info, text_color="#888888", font=("Comic Neue", 9))
+                mod_info_label = ctk.CTkLabel(info_frame, text=mod_info, text_color="#888888", font=("Arial", 9))
                 mod_info_label.pack(anchor="w", pady=(2, 0))
 
                 # Download button
@@ -337,7 +298,7 @@ def start_ui():
             # Show loading message
             for widget in scrollable_frame.winfo_children():
                 widget.destroy()
-            ctk.CTkLabel(scrollable_frame, text="Searching...", text_color="gray", font=("Comic Neue", 12)).pack(pady=20)
+            ctk.CTkLabel(scrollable_frame, text="Searching...", text_color="gray", font=("Arial", 12)).pack(pady=20)
 
             def search_thread():
                 try:
@@ -378,15 +339,15 @@ def start_ui():
         header_frame = ctk.CTkFrame(mods_window, fg_color=SIDEBAR_BG, corner_radius=0)
         header_frame.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header_frame, text="📦  Mods Manager", font=("Comic Neue", 20, "bold")).pack(pady=20, padx=20, anchor="w")
+        ctk.CTkLabel(header_frame, text="📦  Mods Manager", font=("Arial", 20, "bold")).pack(pady=20, padx=20, anchor="w")
 
         # Content
         content_frame = ctk.CTkFrame(mods_window, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=30, pady=20)
 
         # Title and description
-        ctk.CTkLabel(content_frame, text="Installed Mods", font=("Comic Neue", 18, "bold")).pack(anchor="w")
-        ctk.CTkLabel(content_frame, text="Manage your Minecraft mods here.", text_color="gray", font=("Comic Neue", 12)).pack(anchor="w", pady=(0, 20))
+        ctk.CTkLabel(content_frame, text="Installed Mods", font=("Arial", 18, "bold")).pack(anchor="w")
+        ctk.CTkLabel(content_frame, text="Manage your Minecraft mods here.", text_color="gray", font=("Arial", 12)).pack(anchor="w", pady=(0, 20))
 
         # Mods list (scrollable)
         mods_list_frame = ctk.CTkScrollableFrame(content_frame, fg_color=SIDEBAR_BG, corner_radius=10)
@@ -405,7 +366,7 @@ def start_ui():
                     mods_list_frame,
                     text="No mods installed yet.\nClick 'Browse Mods' to get started!",
                     text_color="gray",
-                    font=("Comic Neue", 12),
+                    font=("Arial", 12),
                     justify="center"
                 ).pack(fill="both", expand=True, pady=20)
             else:
@@ -417,11 +378,11 @@ def start_ui():
                     info_frame = ctk.CTkFrame(mod_card, fg_color="transparent")
                     info_frame.pack(fill="x", expand=True, padx=10, pady=10, side="left")
 
-                    mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Comic Neue", 12, "bold"))
+                    mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Arial", 12, "bold"))
                     mod_name.pack(anchor="w")
 
                     mod_size = f"Size: {mod.get('size', 0) / (1024*1024):.2f} MB"
-                    mod_size_label = ctk.CTkLabel(info_frame, text=mod_size, text_color="gray", font=("Comic Neue", 10))
+                    mod_size_label = ctk.CTkLabel(info_frame, text=mod_size, text_color="gray", font=("Arial", 10))
                     mod_size_label.pack(anchor="w", pady=(2, 0))
 
                     # Delete button
@@ -486,7 +447,7 @@ def start_ui():
         sidebar_frame.grid_rowconfigure(10, weight=1) # Empuja lo de abajo
 
         # Título del sidebar
-        label_title = ctk.CTkLabel(sidebar_frame, text="⚙  Settings", font=("Comic Neue", 18, "bold"))
+        label_title = ctk.CTkLabel(sidebar_frame, text="⚙  Settings", font=("Arial", 18, "bold"))
         label_title.pack(pady=25, padx=20, anchor="w")
 
         # --- CONTENIDO (DERECHA) ---
@@ -518,11 +479,11 @@ def start_ui():
 
             if page_name == "Appearance":
                 # Título y descripción
-                ctk.CTkLabel(content_frame, text="Appearance", font=("Comic Neue", 24, "bold")).pack(anchor="w")
+                ctk.CTkLabel(content_frame, text="Appearance", font=("Arial", 24, "bold")).pack(anchor="w")
                 ctk.CTkLabel(content_frame, text="Customize the look of Stella Client.", text_color="gray").pack(anchor="w", pady=(0, 20))
 
                 # Sección de Temas
-                ctk.CTkLabel(content_frame, text="Color theme", font=("Comic Neue", 16, "bold")).pack(anchor="w", pady=10)
+                ctk.CTkLabel(content_frame, text="Color theme", font=("Arial", 16, "bold")).pack(anchor="w", pady=10)
 
                 themes_row = ctk.CTkFrame(content_frame, fg_color="transparent")
                 themes_row.pack(fill="x")
@@ -537,10 +498,10 @@ def start_ui():
                     preview = ctk.CTkFrame(box, fg_color="#111111" if name != "Light" else "#DDDDDD", height=40, corner_radius=5)
                     preview.pack(fill="x", padx=10, pady=(15, 5))
 
-                    ctk.CTkLabel(box, text=name, font=("Comic Neue", 12)).pack(side="bottom", pady=5)
+                    ctk.CTkLabel(box, text=name, font=("Arial", 12)).pack(side="bottom", pady=5)
 
                 # Switch de Renderizado Avanzado
-                ctk.CTkLabel(content_frame, text="Rendering", font=("Comic Neue", 16, "bold")).pack(anchor="w", pady=(30, 10))
+                ctk.CTkLabel(content_frame, text="Rendering", font=("Arial", 16, "bold")).pack(anchor="w", pady=(30, 10))
 
                 render_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
                 render_frame.pack(fill="x")
@@ -553,11 +514,11 @@ def start_ui():
                 settings = minecraft.load_settings()
 
                 # 2. Título y descripción
-                ctk.CTkLabel(content_frame, text="Java & Memory", font=("Comic Neue", 24, "bold")).pack(anchor="w")
+                ctk.CTkLabel(content_frame, text="Java & Memory", font=("Arial", 24, "bold")).pack(anchor="w")
                 ctk.CTkLabel(content_frame, text="Configure how much RAM Stella Client can use.", text_color="gray").pack(anchor="w", pady=(0, 20))
 
                 # 3. Label dinámico de RAM
-                ram_label = ctk.CTkLabel(content_frame, text=f"Allocated Memory: {settings['ram']} GB", font=("Comic Neue", 16, "bold"))
+                ram_label = ctk.CTkLabel(content_frame, text=f"Allocated Memory: {settings['ram']} GB", font=("Arial", 16, "bold"))
                 ram_label.pack(anchor="w", pady=(10, 0))
 
                 def update_ram(value):
@@ -583,20 +544,20 @@ def start_ui():
                 ctk.CTkLabel(
                     content_frame,
                     text="Note: Allocating too much RAM can slow down your system.",
-                    font=("Comic Neue", 12),
+                    font=("Arial", 12),
                     text_color="gray"
                 ).pack(anchor="w")
 
             elif page_name == "Language":
-                ctk.CTkLabel(content_frame, text="Language", font=("Comic Neue", 24, "bold")).pack(anchor="w")
+                ctk.CTkLabel(content_frame, text="Language", font=("Arial", 24, "bold")).pack(anchor="w")
                 ctk.CTkLabel(content_frame, text="Select your preferred language.", text_color="gray").pack(anchor="w", pady=(0, 20))
-                ctk.CTkLabel(content_frame, text="Language", font=("Comic Neue", 16, "bold")).pack(anchor="w", pady=10)
+                ctk.CTkLabel(content_frame, text="Language", font=("Arial", 16, "bold")).pack(anchor="w", pady=10)
                 language_dropdown = ctk.CTkOptionMenu(content_frame, values=["English", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Korean", "Chinese"], button_color="#114066", button_hover_color="#0d3553")
                 language_dropdown.set("English")
                 language_dropdown.pack(anchor="w")
 
             elif page_name == "Privacy":
-                ctk.CTkLabel(content_frame, text="Privacy", font=("Comic Neue", 24, "bold")).pack(anchor="w")
+                ctk.CTkLabel(content_frame, text="Privacy", font=("Arial", 24, "bold")).pack(anchor="w")
                 ctk.CTkLabel(content_frame, text="Configure your privacy settings.", text_color="gray").pack(anchor="w", pady=(0, 20))
                 privacy_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
                 privacy_frame.pack(fill="x", pady=10)
@@ -626,7 +587,7 @@ def start_ui():
         create_menu_btn("Java", "☕").pack(fill="x", padx=10, pady=2)
 
         # Información de versión abajo
-        info_label = ctk.CTkLabel(sidebar_frame, text="Stella Client 0.1.0\nLinux 6.8.0", font=("Comic Neue", 10), text_color="gray")
+        info_label = ctk.CTkLabel(sidebar_frame, text="Stella Client 0.1.0\nLinux 6.8.0", font=("Arial", 10), text_color="gray")
         info_label.pack(side="bottom", pady=20)
 
         # Iniciar mostrando Appearance
@@ -699,13 +660,13 @@ def start_ui():
                     ctk.CTkLabel(
                         warning, 
                         text="⚠️ Version Auto-Changed", 
-                        font=("Comic Neue", 16, "bold")
+                        font=("Arial", 16, "bold")
                     ).pack(pady=20)
                     
                     ctk.CTkLabel(
                         warning, 
                         text=f"The game version was automatically changed from {original_version} to {new_settings['version']}\nto be compatible with your installed mods.\n\nPlease re-download mods from the Mods menu for the new version.",
-                        font=("Comic Neue", 12),
+                        font=("Arial", 12),
                         justify="center"
                     ).pack(pady=10, padx=20)
                     
