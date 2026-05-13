@@ -1,21 +1,40 @@
 import requests
 import json
 import os
+import threading
 from pathlib import Path
 
 MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
 MODS_DIR = Path(MINECRAFT_DIR) / "mods"
+INSTALLED_MODS_FILE = os.path.join(MINECRAFT_DIR, "installed_mods.json")
+_install_lock = threading.Lock()
+
+
+def save_installed_mod_info(mod_id, filename, project_type="mod", thumbnail=""):
+    with _install_lock:
+        data = {}
+        if os.path.exists(INSTALLED_MODS_FILE):
+            with open(INSTALLED_MODS_FILE) as f:
+                data = json.load(f)
+        data[mod_id] = {"filename": filename, "project_type": project_type, "thumbnail": thumbnail}
+        os.makedirs(os.path.dirname(INSTALLED_MODS_FILE), exist_ok=True)
+        with open(INSTALLED_MODS_FILE, "w") as f:
+            json.dump(data, f)
 
 def get_mods_dir():
     MODS_DIR.mkdir(parents=True, exist_ok=True)
     return MODS_DIR
 
-def search_modrinth(query, version="1.20.1", loader="fabric"):
+def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod"):
     """Search for mods on Modrinth with version filtering"""
     url = "https://api.modrinth.com/v2/search"
+    facets = [[f"project_type:{project_type}"]]
+    if loader != "fabric":
+        facets.append([f"categories:{loader}"])
     params = {
         "query": query,
         "limit": 20,
+        "facets": json.dumps(facets),
     }
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -41,6 +60,7 @@ def search_modrinth(query, version="1.20.1", loader="fabric"):
                 # Only include mods that have at least the requested loader
                 loaders = hit.get("loaders", [])
                 if loader in loaders or not loaders:
+                    ptype = hit.get("project_type", project_type)
                     results.append({
                         "name": hit.get("title", ""),
                         "description": hit.get("description", ""),
@@ -48,6 +68,7 @@ def search_modrinth(query, version="1.20.1", loader="fabric"):
                         "version": best_version or (versions[0] if versions else "Unknown"),
                         "downloads": hit.get("downloads", 0),
                         "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
+                        "project_type": ptype,
                         "source": "modrinth"
                     })
             return results
@@ -103,13 +124,17 @@ FORGE_VERSIONS = {
     "1.16.5": "36.2.0"
 }
 
-def get_trending_mods(version="1.20.4", loader="fabric", limit=15):
+def get_trending_mods(version="1.20.4", loader="fabric", limit=15, project_type="mod"):
     """Get trending mods from Modrinth"""
     url = "https://api.modrinth.com/v2/search"
+    facets = [[f"project_type:{project_type}"]]
+    if loader != "fabric":
+        facets.append([f"categories:{loader}"])
     params = {
         "query": "",
         "limit": limit,
         "index": "downloads",
+        "facets": json.dumps(facets),
     }
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -122,6 +147,7 @@ def get_trending_mods(version="1.20.4", loader="fabric", limit=15):
                 "version": hit.get("versions", ["Unknown"])[0] if hit.get("versions") else "Unknown",
                 "downloads": hit.get("downloads", 0),
                 "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
+                "project_type": hit.get("project_type", project_type),
                 "source": "modrinth"
             } for hit in data.get("hits", [])]
     except Exception as e:
@@ -170,7 +196,7 @@ def download_forge(mc_version):
         print(f"Error downloading Forge: {e}")
     return None
 
-def download_mod(mod_id, mc_version="1.20.1", source="modrinth"):
+def download_mod(mod_id, mc_version="1.20.1", source="modrinth", project_type="mod", thumbnail=""):
     """Download a mod from Modrinth, selecting the version that matches the MC version"""
     if source == "modrinth":
         try:
@@ -201,18 +227,12 @@ def download_mod(mod_id, mc_version="1.20.1", source="modrinth"):
             print(f"Downloading {filename}...")
             mod_resp = requests.get(download_url, stream=True, timeout=60)
             if mod_resp.status_code == 200:
-                total_size = int(mod_resp.headers.get('content-length', 0))
-                downloaded = 0
-                
                 with open(filepath, 'wb') as f:
                     for chunk in mod_resp.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
-                            downloaded += len(chunk)
-                            if total_size:
-                                progress = (downloaded / total_size) * 100
-                                print(f"Progress: {progress:.1f}%", end='\r')
                 
+                save_installed_mod_info(mod_id, filename, project_type, thumbnail)
                 print(f"\nSuccessfully downloaded to {filepath}")
                 return str(filepath)
             else:
@@ -221,16 +241,33 @@ def download_mod(mod_id, mc_version="1.20.1", source="modrinth"):
             print(f"Error downloading mod: {e}")
     return None
 
-def get_installed_mods():
-    """Get list of installed mods"""
+def get_installed_mods(project_type=None):
+    """Get list of installed mods, optionally filtered by project_type"""
+    installed_map = {}
+    if os.path.exists(INSTALLED_MODS_FILE):
+        with open(INSTALLED_MODS_FILE) as f:
+            installed_map = json.load(f)
     mods_dir = get_mods_dir()
+    def _get_info(entry):
+        if isinstance(entry, str):
+            return {"filename": entry, "project_type": None, "thumbnail": ""}
+        return entry
+
     mods = []
     for f in mods_dir.glob("*.jar"):
+        entry = next((v for k, v in installed_map.items() if _get_info(v).get("filename") == f.name), None)
+        info = _get_info(entry) if entry else None
+        if project_type and (not info or info.get("project_type") != project_type):
+            continue
+        mod_id = next((k for k, v in installed_map.items() if _get_info(v).get("filename") == f.name), None)
         mods.append({
             "name": f.stem,
             "filename": f.name,
             "path": str(f),
-            "size": f.stat().st_size
+            "size": f.stat().st_size,
+            "mod_id": mod_id,
+            "project_type": info.get("project_type") if info else None,
+            "thumbnail": info.get("thumbnail", "") if info else "",
         })
     return mods
 

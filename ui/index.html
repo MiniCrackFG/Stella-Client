@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stella Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@300;400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="sidebar-logo">Stella</div>
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-page="home" title="Home">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </button>
+        <button class="nav-btn" data-page="account" title="Account">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </button>
+        <button class="nav-btn" data-page="mods" title="Mods">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </button>
+        <button class="nav-btn" data-page="settings" title="Settings">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="nav-btn" data-page="settings" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <main id="content">
+      <div id="page-home" class="page active">
+        <div class="hero">
+          <h1>Stella Client</h1>
+          <p class="hero-subtitle">Minecraft Launcher</p>
+        </div>
+        <div class="play-card">
+          <div class="play-info">
+            <span id="user-badge" class="user-badge">👤 Cargando...</span>
+            <div class="version-select">
+              <label>Version</label>
+              <select id="version-select"></select>
+            </div>
+          </div>
+          <button id="play-btn" class="btn-play">▶  PLAY</button>
+        </div>
+        <div class="quick-nav">
+          <button class="quick-btn" onclick="navigate('mods')">📦  Mods</button>
+          <button class="quick-btn" onclick="navigate('settings')">⚙  Settings</button>
+        </div>
+      </div>
+
+      <div id="page-account" class="page">
+        <h2>Account</h2>
+        <div id="account-content"></div>
+      </div>
+
+      <div id="page-mods" class="page">
+        <h2>Mods Manager</h2>
+        <div class="category-tabs">
+          <button class="cat-btn active" data-cat="mod">Mods</button>
+          <button class="cat-btn" data-cat="modpack">Modpacks</button>
+          <button class="cat-btn" data-cat="resourcepack">Resource Packs</button>
+          <button class="cat-btn" data-cat="shader">Shaders</button>
+        </div>
+        <div class="mods-toolbar">
+          <input type="text" id="mod-search" placeholder="Search by name..." />
+          <select id="mod-version"></select>
+          <select id="mod-sort">
+            <option value="downloads">Most Downloaded</option>
+            <option value="follows">Most Followed</option>
+            <option value="updated">Recently Updated</option>
+            <option value="relevance">Relevance</option>
+          </select>
+          <select id="mod-source">
+            <option value="modrinth">Modrinth</option>
+            <option value="forge">Forge</option>
+          </select>
+          <button id="mod-search-btn" class="btn-primary">Search</button>
+        </div>
+        <div class="mods-tabs">
+          <button class="tab-btn active" data-tab="browse">Browse</button>
+          <button class="tab-btn" data-tab="installed">Installed</button>
+        </div>
+        <div id="mods-browse" class="tab-content active"></div>
+        <div id="mods-installed" class="tab-content"></div>
+      </div>
+
+      <div id="page-settings" class="page">
+        <h2>Settings</h2>
+        <div class="settings-tabs">
+          <button class="tab-btn active" data-tab="appearance">Appearance</button>
+          <button class="tab-btn" data-tab="runtime">Runtime</button>
+          <button class="tab-btn" data-tab="privacy">Privacy</button>
+        </div>
+        <div id="settings-appearance" class="tab-content active">
+          <div class="setting-group">
+            <label>Theme</label>
+            <div class="theme-selector" id="theme-selector">
+              <div class="theme-option" data-theme="dark">🌙 Dark</div>
+              <div class="theme-option" data-theme="light">☀️ Light</div>
+              <div class="theme-option" data-theme="oled">⬛ OLED</div>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Rounded Corners</label>
+            <input type="range" id="corner-slider" min="4" max="24" value="12" />
+            <span id="corner-value">12px</span>
+          </div>
+          <div class="setting-group">
+            <label>Smooth Rendering</label>
+            <label class="switch">
+              <input type="checkbox" id="smooth-rendering" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="settings-runtime" class="tab-content">
+          <div class="setting-group">
+            <label>Memory (RAM)</label>
+            <input type="range" id="ram-slider" min="2" max="16" value="4" />
+            <span id="ram-value">4 GB</span>
+          </div>
+          <div class="setting-group">
+            <label>Java Path</label>
+            <input type="text" id="java-path" placeholder="java" />
+          </div>
+          <div class="setting-group">
+            <label>Minecraft Directory</label>
+            <input type="text" id="mc-dir" placeholder="~/.stellaclient" />
+          </div>
+          <button id="save-java-btn" class="btn-primary">Save</button>
+        </div>
+        <div id="settings-privacy" class="tab-content">
+          <div class="setting-group">
+            <label>Discord RPC</label>
+            <label class="switch">
+              <input type="checkbox" id="discord-rpc" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="mod-detail-overlay" class="overlay" onclick="closeModDetail(event)">
+    <div class="overlay-content" onclick="event.stopPropagation()">
+      <button class="overlay-close" onclick="closeModDetail()">✕</button>
+      <div id="mod-detail-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
