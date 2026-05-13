@@ -124,17 +124,29 @@ def complete_login_with_browser(callback_url, state, code_verifier):
         return None
 
 def logout():
-    """Cierra la sesión premium y limpia cuenta offline."""
+    """Cierra la sesión premium conservando el perfil offline."""
     if os.path.exists(AUTH_FILE):
         os.remove(AUTH_FILE)
+
+
+def logout_all():
+    """Cierra la sesión premium y limpia la cuenta offline."""
+    logout()
     clear_offline_account()
 
-def login_offline(username):
-    """Guarda un nombre de usuario para modo offline."""
+
+def set_offline_username(username):
+    """Establece el nombre de usuario para el modo offline."""
     settings = load_settings()
     settings["username"] = username
     save_settings(settings)
     return username
+
+
+def login_offline(username):
+    """Guarda un nombre de usuario para modo offline y cierra cualquier sesión premium existente."""
+    logout()
+    return set_offline_username(username)
 
 class OAuthCallbackHandler(http.server.SimpleHTTPRequestHandler):
     """Handler para el callback de OAuth."""

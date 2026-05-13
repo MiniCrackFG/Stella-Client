@@ -47,6 +47,7 @@ def search_modrinth(query, version="1.20.1", loader="fabric"):
                         "mod_id": mod_id,
                         "version": best_version or (versions[0] if versions else "Unknown"),
                         "downloads": hit.get("downloads", 0),
+                        "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
                         "source": "modrinth"
                     })
             return results
@@ -120,6 +121,7 @@ def get_trending_mods(version="1.20.4", loader="fabric", limit=15):
                 "mod_id": hit.get("project_id", ""),
                 "version": hit.get("versions", ["Unknown"])[0] if hit.get("versions") else "Unknown",
                 "downloads": hit.get("downloads", 0),
+                "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
                 "source": "modrinth"
             } for hit in data.get("hits", [])]
     except Exception as e:

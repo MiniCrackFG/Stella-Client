@@ -1,7 +1,9 @@
 import threading
 import time
+from io import BytesIO
 
 import requests
+from PIL import Image
 import launcher.minecraft as minecraft
 import launcher.discord_rpc as discord_rpc
 import launcher.mods as mods
@@ -13,47 +15,363 @@ def start_ui():
 
     app = ctk.CTk()
     app.title("Stella Client")
-    app.geometry("950x550")
-    app.resizable(False, False)
+    app.geometry("1000x550")
+    app.minsize(800, 450)
+    app.grid_columnconfigure(0, weight=1)
+    app.grid_rowconfigure(0, weight=1)
 
-    # Colores
+    def toggle_fullscreen():
+        app.attributes('-fullscreen', not app.attributes('-fullscreen'))
+    app.bind("<F11>", lambda e: toggle_fullscreen())
+
+    ui_ready = {"value": False}
+    preload_data_store = {"settings": None, "auth": None, "mods": None}
+
+    # --- SPLASH SCREEN ---
+    splash_frame = ctk.CTkFrame(app, fg_color="#1C1C1C")
+    splash_frame.grid(row=0, column=0, sticky="nsew")
+    splash_frame.grid_columnconfigure(0, weight=1)
+    splash_frame.grid_rowconfigure(0, weight=1)
+
+    splash_content = ctk.CTkFrame(splash_frame, fg_color="transparent")
+    splash_content.grid(row=0, column=0, sticky="")
+    splash_content.grid_columnconfigure(0, weight=1)
+
+    ctk.CTkLabel(splash_content, text="Stella Client", font=("Comic Neue", 48, "bold"), text_color="#4A8FBF").grid(row=0, column=0, pady=(160, 20))
+
+    progress_label = ctk.CTkLabel(splash_content, text="Cargando...", font=("Comic Neue", 14), text_color="#888888")
+    progress_label.grid(row=1, column=0, pady=(20, 10))
+
+    progress_bar = ctk.CTkProgressBar(splash_content, width=300, height=8, progress_color="#4A8FBF")
+    progress_bar.set(0)
+    progress_bar.grid(row=2, column=0, pady=10)
+
+    def update_splash(text, progress):
+        progress_label.configure(text=text)
+        progress_bar.set(progress)
+    app.update()
+
     BG_COLOR = "#1C1C1C"
     SIDEBAR_BG = "#262626"
     ACCENT_BLUE = "#114066"
     ACCENT_BLUE_LIGHT = "#4A8FBF"
-    ACCENT_LIGHT = "#4A8FBF"
     CARD_BG = "#2D2D2D"
 
-    # Fuentes Comic Neue
     FONT_TITLE = ctk.CTkFont(family="Comic Neue", size=42, weight="bold")
     FONT_HEADING = ctk.CTkFont(family="Comic Neue", size=24, weight="bold")
     FONT_SUBHEADING = ctk.CTkFont(family="Comic Neue", size=18, weight="bold")
     FONT_BODY = ctk.CTkFont(family="Comic Neue", size=14)
     FONT_SMALL = ctk.CTkFont(family="Comic Neue", size=12)
 
-    def do_login_poll(device_info, account_window, status_label, code_display):
+    thumbnail_cache = {}
+    cached_mods = {"trending": [], "search": [], "loaded": False}
+    cached_versions = []
+
+    def load_mod_thumbnail(url):
+        if not url or url in thumbnail_cache:
+            return thumbnail_cache.get(url)
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                image = Image.open(BytesIO(resp.content)).convert("RGBA")
+                thumbnail_cache[url] = image
+                return image
+        except Exception:
+            return None
+
+    def preload_thumbnails(mod_list, max_thumbnails=8):
+        for m in mod_list[:max_thumbnails]:
+            url = m.get("thumbnail")
+            if url and url not in thumbnail_cache:
+                threading.Thread(target=lambda u=url: load_mod_thumbnail(u), daemon=True).start()
+
+    def bind_mousewheel(widget):
+        def _on_mousewheel_linux(event):
+            if event.num == 4:
+                widget._parent_canvas.yview_scroll(-3, "units")
+            elif event.num == 5:
+                widget._parent_canvas.yview_scroll(3, "units")
+        def _on_mousewheel_windows(event):
+            widget._parent_canvas.yview_scroll(-int(event.delta / 120) * 3, "units")
+        try:
+            widget.bind_all("<Button-4>", _on_mousewheel_linux)
+            widget.bind_all("<Button-5>", _on_mousewheel_linux)
+        except:
+            pass
+        try:
+            widget.bind_all("<MouseWheel>", _on_mousewheel_windows)
+        except:
+            pass
+
+    # --- PRE-CARGAR DATOS ---
+    def preload_data():
+        app.after(0, lambda: update_splash("Cargando configuración...", 0.1))
+        minecraft.load_settings()
+        settings = minecraft.load_settings()
+        preload_data_store["settings"] = settings
+
+        app.after(0, lambda: update_splash("Cargando perfil...", 0.2))
+        auth = minecraft.load_auth()
+        preload_data_store["auth"] = auth
+
+        app.after(0, lambda: update_splash("Cargando versiones...", 0.3))
+        global cached_versions
+        try: cached_versions = minecraft.get_available_versions()
+        except: pass
+
+        app.after(0, lambda: update_splash("Cargando mods instalados...", 0.5))
+        try:
+            installed = mods.get_installed_mods()
+            preload_data_store["mods"] = installed
+        except: pass
+
+        app.after(0, lambda: update_splash("Cargando mods trending...", 0.7))
+        try:
+            version = settings.get("version", "1.21.1")
+            trending = mods.get_trending_mods(version=version, limit=15)
+            cached_mods["trending"] = trending
+            preload_thumbnails(trending, max_thumbnails=8)
+        except: pass
+
+        app.after(0, lambda: update_splash("Inicializando Discord RPC...", 0.9))
+        try: discord_rpc.init_rpc(); discord_rpc.update_menu()
+        except: pass
+
+        app.after(0, lambda: update_splash("¡Listo!", 1.0))
+        cached_mods["loaded"] = True
+        ui_ready["value"] = True
+
+    threading.Thread(target=preload_data, daemon=True).start()
+
+    # --- SISTEMA DE PÁGINAS ---
+    main_container = ctk.CTkFrame(app, fg_color=BG_COLOR)
+    main_container.grid(row=0, column=0, sticky="nsew")
+    main_container.grid_columnconfigure(0, weight=1)
+    main_container.grid_rowconfigure(0, weight=1)
+    main_container.grid_remove()
+
+    page_container = ctk.CTkFrame(main_container, fg_color=BG_COLOR)
+    page_container.grid(row=0, column=0, sticky="nsew")
+    page_container.grid_rowconfigure(1, weight=1)
+    page_container.grid_columnconfigure(0, weight=1)
+
+    nav_bar = ctk.CTkFrame(page_container, fg_color=SIDEBAR_BG, corner_radius=0, height=50)
+    nav_bar.grid(row=0, column=0, sticky="ew")
+    nav_bar.grid_columnconfigure(0, weight=1)
+    nav_bar.grid_propagate(False)
+
+    nav_title = ctk.CTkLabel(nav_bar, text="Stella Client", font=FONT_SUBHEADING, text_color="#4A8FBF")
+    nav_title.grid(row=0, column=0, sticky="w", padx=20)
+
+    nav_back_btn = ctk.CTkButton(nav_bar, text="← Volver", font=FONT_BODY,
+        fg_color="transparent", hover_color="#3D3D3D", width=100, command=lambda: None)
+    nav_back_btn.grid(row=0, column=1, sticky="e", padx=10)
+    nav_back_btn.grid_remove()
+
+    content_area = ctk.CTkFrame(page_container, fg_color=BG_COLOR)
+    content_area.grid(row=1, column=0, sticky="nsew")
+    content_area.grid_columnconfigure(0, weight=1)
+    content_area.grid_rowconfigure(0, weight=1)
+
+    def clear_content():
+        for w in content_area.winfo_children():
+            w.destroy()
+
+
+    account_btn_ref = {"btn": None}
+
+
+    def refresh_account_btn():
+        if account_btn_ref["btn"]:
+            user = minecraft.get_current_user()
+            account_btn_ref["btn"].configure(
+                text=f"👤 {user[:15]}" if user else "👤 Account"
+        )
+
+    # --- HOME ---
+    def show_home():
+        clear_content()
+        nav_title.configure(text="Stella Client")
+        nav_back_btn.grid_remove()
+
+        inner = ctk.CTkFrame(content_area, fg_color="transparent")
+        inner.grid(row=0, column=0, sticky="nsew")
+        inner.grid_columnconfigure(0, weight=1)
+
+        title_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        title_frame.grid(row=0, column=0, sticky="ew", pady=(60, 40), padx=60)
+        title_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(title_frame, text="Stella Client", font=FONT_TITLE, text_color="#FFFFFF").grid(row=0, column=0, sticky="w")
+
+        account_btn = ctk.CTkButton(
+            title_frame, text="👤 Account", width=150, height=44,
+            fg_color=CARD_BG, border_color=ACCENT_BLUE, border_width=2,
+            hover_color="#3D3D3D", font=FONT_BODY,
+            command=lambda: show_account())
+        account_btn.grid(row=0, column=1, sticky="e")
+        account_btn_ref["btn"] = account_btn
+        refresh_account_btn()
+
+        play_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        play_frame.grid(row=1, column=0, sticky="ew", padx=60, pady=(30, 40))
+        play_frame.grid_columnconfigure(0, weight=1)
+
+        def launch_game():
+            def game_thread():
+                settings = minecraft.load_settings()
+                original_version = settings["version"]
+                discord_rpc.update_playing()
+                minecraft.launch_minecraft()
+                new_settings = minecraft.load_settings()
+                if new_settings["version"] != original_version:
+                    def show_warning():
+                        w = ctk.CTkToplevel(app)
+                        w.title("Version Changed")
+                        w.geometry("500x200")
+                        w.after(10, w.lift)
+                        w.configure(fg_color=BG_COLOR)
+                        ctk.CTkLabel(w, text="⚠️ Version Auto-Changed", font=("Comic Neue", 16, "bold")).pack(pady=20)
+                        ctk.CTkLabel(w, text=f"The game version was changed from {original_version} to {new_settings['version']}\nto be compatible with your mods.", font=("Comic Neue", 12), justify="center").pack(pady=10, padx=20)
+                        ctk.CTkButton(w, text="OK", command=w.destroy, fg_color=ACCENT_BLUE, hover_color="#0d3553").pack(pady=20)
+                    app.after(1000, show_warning)
+                discord_rpc.update_menu()
+            threading.Thread(target=game_thread, daemon=True).start()
+
+        ctk.CTkButton(
+            play_frame, text="▶  PLAY", font=FONT_SUBHEADING,
+            height=70, width=240, fg_color=ACCENT_BLUE, hover_color="#0d3553",
+            corner_radius=12, command=launch_game
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 20))
+
+        def on_version_change(v):
+            minecraft.set_version(v)
+
+        av = minecraft.get_available_versions()
+        cv = minecraft.load_settings()["version"]
+        vd = ctk.CTkOptionMenu(
+            play_frame, values=av, command=on_version_change,
+            button_color="#114066", button_hover_color="#0d3553",
+            text_color="#4A8FBF", fg_color=CARD_BG, font=FONT_BODY
+        )
+        vd.set(cv)
+        vd.grid(row=0, column=1, sticky="e", padx=(10, 0))
+
+        bottom_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        bottom_frame.grid(row=2, column=0, sticky="se", padx=60, pady=(40, 50))
+
+        bs = ctk.CTkFrame(bottom_frame, fg_color="transparent")
+        bs.pack()
+
+        ctk.CTkButton(bs, text="📦  Mods", width=140, height=44,
+            fg_color=CARD_BG, border_color="#3a3a3a", border_width=1,
+            hover_color="#3D3D3D", font=FONT_BODY,
+            command=lambda: show_mods()).pack(pady=(0, 10))
+
+        ctk.CTkButton(bs, text="⚙  Settings", width=140, height=44,
+            fg_color=CARD_BG, border_color="#3a3a3a", border_width=1,
+            hover_color="#3D3D3D", font=FONT_BODY,
+            command=lambda: show_settings()).pack()
+
+    # --- ACCOUNT PAGE ---
+    def show_account():
+        clear_content()
+        nav_title.configure(text="👤  Account")
+        nav_back_btn.configure(command=lambda: show_home())
+        nav_back_btn.grid()
+
+        main = ctk.CTkFrame(content_area, fg_color="transparent")
+        main.grid(row=0, column=0, sticky="nsew", padx=60, pady=30)
+        main.grid_columnconfigure(0, weight=1)
+
+        auth_data = minecraft.load_auth()
+        offline_username = minecraft.get_offline_username()
+        offline_exists = minecraft.has_offline_account()
+        is_premium = auth_data is not None and "username" in auth_data
+
+        if is_premium:
+            ctk.CTkLabel(main, text="✓  CUENTA PREMIUM", font=FONT_HEADING, text_color="#00FF00").pack(anchor="w", pady=(10, 10))
+            ctk.CTkLabel(main, text=f"Usuario: {auth_data['username']}", font=FONT_SUBHEADING, text_color="white").pack(anchor="w", pady=5)
+            ctk.CTkLabel(main, text=f"UUID: {auth_data.get('uuid', 'N/A')}", font=FONT_BODY, text_color="#888888").pack(anchor="w", pady=2)
+            ctk.CTkLabel(main, text="Puedes jugar con tu cuenta premium ahora.", font=FONT_BODY, text_color="#aaaaaa").pack(anchor="w", pady=(15, 30))
+            ctk.CTkButton(main, text="Cerrar Sesión Premium", fg_color="#c42b1c", hover_color="#8b1e14",
+                text_color="white", command=lambda: [minecraft.logout(), show_account()], height=50, font=FONT_SUBHEADING).pack(pady=10, fill="x")
+            if offline_exists:
+                ctk.CTkButton(main, text="Usar Cuenta Offline", fg_color="#4A8FBF", hover_color="#36749c",
+                    text_color="white", command=lambda: [minecraft.logout(), show_account()], height=50, font=FONT_SUBHEADING).pack(pady=10, fill="x")
+        else:
+            ctk.CTkLabel(main, text="Cuenta Offline / Microsoft", font=FONT_HEADING, text_color="white").pack(anchor="w", pady=(10, 5))
+
+            sep = ctk.CTkFrame(main, fg_color="#333333", height=1)
+            sep.pack(fill="x", pady=(10, 20))
+
+            if offline_exists:
+                ctk.CTkLabel(main, text=f"✓ Modo offline activo como:", font=FONT_BODY, text_color="#aaaaaa").pack(anchor="w")
+                ctk.CTkLabel(main, text=offline_username, font=FONT_SUBHEADING, text_color="#00FF00").pack(anchor="w", pady=(0, 15))
+            else:
+                ctk.CTkLabel(main, text="No hay perfil offline configurado.", font=FONT_BODY, text_color="#666666").pack(anchor="w", pady=(0, 15))
+
+            ctk.CTkLabel(main, text="Nombre de usuario", font=FONT_SUBHEADING).pack(anchor="w")
+            offline_entry = ctk.CTkEntry(main, placeholder_text="Ingresa un nickname", font=FONT_BODY, height=45)
+            offline_entry.pack(fill="x", pady=(5, 15))
+
+            sl = ctk.CTkLabel(main, text="", font=FONT_BODY, text_color="white")
+            sl.pack(pady=2)
+
+            def apply_offline():
+                name = offline_entry.get().strip()
+                if not name:
+                    sl.configure(text="Ingresa un nombre válido.", text_color="red")
+                    return
+                minecraft.login_offline(name)
+                sl.configure(text=f"Modo offline activado como {name}", text_color="#00FF00")
+
+            def clear_offline():
+                minecraft.clear_offline_account()
+                sl.configure(text="Perfil offline eliminado.", text_color="#00FF00")
+
+            br = ctk.CTkFrame(main, fg_color="transparent")
+            br.pack(fill="x", pady=(0, 20))
+            br.grid_columnconfigure(0, weight=1)
+            br.grid_columnconfigure(1, weight=1)
+            ctk.CTkButton(br, text="✓ Guardar Offline", fg_color="#4A8FBF", hover_color="#36749c", command=apply_offline, height=50, font=FONT_BODY).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+            ctk.CTkButton(br, text="✕ Eliminar Offline", fg_color="#8b1e14", hover_color="#6a1510", command=clear_offline, height=50, font=FONT_BODY).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+            sep2 = ctk.CTkFrame(main, fg_color="#333333", height=1)
+            sep2.pack(fill="x", pady=(10, 20))
+
+            ctk.CTkLabel(main, text="O inicia sesión con Microsoft:", font=FONT_SUBHEADING).pack(anchor="w", pady=(0, 10))
+
+            cd = ctk.CTkLabel(main, text="---", font=("Comic Neue", 36, "bold"), text_color="#00FF00")
+            cd.pack(pady=10)
+
+            def start_login():
+                try:
+                    sl.configure(text="Obteniendo código...")
+                    di = minecraft.get_device_code_info()
+                    cd.configure(text=di.get("user_code", "Error"))
+                    sl.configure(text="Ingresa este código en el navegador y espera...")
+                    import webbrowser
+                    webbrowser.open(di.get("verification_uri", ""))
+                    threading.Thread(target=lambda: do_login_poll(di, sl, cd), daemon=True).start()
+                except Exception as e:
+                    sl.configure(text=f"Error: {str(e)}", text_color="red")
+
+            ctk.CTkButton(main, text="► Iniciar Sesión con Microsoft", fg_color="#00FF00", hover_color="#00cc00",
+                text_color="black", command=start_login, height=55, font=("Comic Neue", 17, "bold")).pack(pady=(10, 5), fill="x")
+
+    def do_login_poll(device_info, status_label, code_display):
         import minecraft_launcher_lib.microsoft_account as ma
-        import webbrowser
-
-        device_code = device_info.get("device_code", "")
+        dc = device_info.get("device_code", "")
         interval = device_info.get("interval", 5)
-        max_attempts = 120
+        maxt = 120
         attempt = 0
-
         status_label.configure(text="Esperando autorización... (puede tomar 1-2 minutos)")
-
-        while attempt < max_attempts:
+        while attempt < maxt:
             time.sleep(interval)
             attempt += 1
-
-            token_data = {
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "client_id": "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb",
-                "device_code": device_code
-            }
-
-            resp = requests.post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token", data=token_data)
-
+            td = {"grant_type": "urn:ietf:params:oauth:grant-type:device_code", "client_id": "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb", "device_code": dc}
+            resp = requests.post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token", data=td)
             if resp.status_code == 200:
                 status_label.configure(text="¡Token recibido!", text_color="white")
                 tokens = resp.json()
@@ -61,717 +379,244 @@ def start_ui():
             elif resp.status_code != 400:
                 status_label.configure(text=f"Error: {resp.status_code}", text_color="red")
                 return
-
-            error_data = resp.json()
-            error = error_data.get("error", "")
-            if error == "authorization_pending":
+            err = resp.json().get("error", "")
+            if err == "authorization_pending":
                 if attempt % 6 == 0:
                     status_label.configure(text=f"Esperando... ({attempt * interval}s)", text_color="yellow")
-            elif error in ["authorization_declined", "expired_token"]:
-                status_label.configure(text=f"Error: {error}", text_color="red")
+            elif err in ["authorization_declined", "expired_token"]:
+                status_label.configure(text=f"Error: {err}", text_color="red")
                 return
-            elif error == "slow_down":
+            elif err == "slow_down":
                 interval += 1
-
-        if attempt >= max_attempts:
+        if attempt >= maxt:
             status_label.configure(text="Tiempo de espera agotado", text_color="red")
             return
-
         try:
-            access_token = tokens["access_token"]
-            xbl_data = ma.authenticate_with_xbl(access_token)
-            display_claims = xbl_data.get("DisplayClaims", {})
-            xui = display_claims.get("xui", [{}])[0]
-            userhash = xui.get("uhs", "")
-
-            xsts_data = ma.authenticate_with_xsts(xbl_data["Token"])
-            mc_data = ma.authenticate_with_minecraft(userhash, xsts_data["Token"])
-            profile = ma.get_profile(mc_data["access_token"])
-
-            minecraft.save_auth({
-                "access_token": access_token,
-                "refresh_token": tokens.get("refresh_token", ""),
-                "xbl_token": xbl_data["Token"],
-                "xsts_token": xsts_data["Token"],
-                "mc_access_token": mc_data["access_token"],
-                "uuid": profile["id"],
-                "username": profile["name"],
-            })
-
+            xbl = ma.authenticate_with_xbl(tokens["access_token"])
+            uhs = xbl.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs", "")
+            xsts = ma.authenticate_with_xsts(xbl["Token"])
+            mc = ma.authenticate_with_minecraft(uhs, xsts["Token"])
+            profile = ma.get_profile(mc["access_token"])
+            minecraft.save_auth({"access_token": tokens["access_token"], "refresh_token": tokens.get("refresh_token", ""), "xbl_token": xbl["Token"], "xsts_token": xsts["Token"], "mc_access_token": mc["access_token"], "uuid": profile["id"], "username": profile["name"]})
             status_label.configure(text=f"✓ Logueado como {profile['name']}", text_color="#00FF00")
-            account_window.after(2000, account_window.destroy)
-
         except Exception as e:
             status_label.configure(text=f"Error: {str(e)}", text_color="red")
 
-    def open_account():
-        account_window = ctk.CTkToplevel(app)
-        account_window.title("Account")
-        account_window.geometry("600x500")
-        account_window.after(10, account_window.lift)
-        account_window.configure(fg_color="#2b2b2b")
+    # --- BROWSE MODS PAGE ---
+    def show_browse_mods():
+        clear_content()
+        nav_title.configure(text="🔍  Browse Mods")
+        nav_back_btn.configure(command=lambda: show_mods())
+        nav_back_btn.grid()
 
-        header_frame = ctk.CTkFrame(account_window, fg_color="#1a1a1a", corner_radius=0)
-        header_frame.pack(fill="x", pady=(0, 10))
+        cf = ctk.CTkFrame(content_area, fg_color="transparent")
+        cf.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
+        cf.grid_columnconfigure(0, weight=1)
+        cf.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(header_frame, text="👤  Account", font=("Arial", 20, "bold"), text_color="white").pack(pady=15, padx=20, anchor="w")
+        controls = ctk.CTkFrame(cf, fg_color="transparent")
+        controls.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        controls.grid_columnconfigure(1, weight=1)
 
-        content_frame = ctk.CTkFrame(account_window, fg_color="#2b2b2b")
-        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        ctk.CTkLabel(controls, text="Search:", font=FONT_BODY).grid(row=0, column=0, sticky="w", padx=(0, 5))
+        sv = ctk.StringVar()
+        ctk.CTkEntry(controls, textvariable=sv, placeholder_text="Search mods...", width=280).grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
-        current_user = minecraft.get_current_user()
+        ctk.CTkLabel(controls, text="Version:", font=FONT_BODY).grid(row=0, column=2, sticky="w", padx=(0, 5))
+        av = minecraft.get_available_versions()
+        cv = minecraft.load_settings()["version"]
+        vd = ctk.CTkOptionMenu(controls, values=av, button_color="#114066", button_hover_color="#0d3553", text_color="#4A8FBF", dropdown_text_color="white", width=110)
+        vd.set(cv)
+        vd.grid(row=0, column=3, sticky="w", padx=(0, 10))
 
-        if current_user:
-            ctk.CTkLabel(content_frame, text="✓ CUENTA PREMIUM", font=("Arial", 14, "bold"), text_color="#00FF00").pack(anchor="w", pady=(10, 5))
-            auth_data = minecraft.load_auth()
-            ctk.CTkLabel(content_frame, text=f"Usuario: {current_user}", font=("Arial", 16, "bold"), text_color="white").pack(anchor="w", pady=5)
-            uuid = auth_data.get("uuid", "N/A") if auth_data else "N/A"
-            ctk.CTkLabel(content_frame, text=f"UUID: {uuid}", font=("Arial", 12), text_color="#888888").pack(anchor="w", pady=2)
-            ctk.CTkLabel(content_frame, text="Puedes jugar con tu cuenta premium ahora.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(15, 20))
+        ctk.CTkLabel(controls, text="Source:", font=FONT_BODY).grid(row=0, column=4, sticky="w", padx=(0, 5))
+        sd = ctk.CTkOptionMenu(controls, values=["modrinth", "forge"], button_color="#114066", button_hover_color="#0d3553", text_color="#4A8FBF", dropdown_text_color="white", width=110)
+        sd.set("modrinth")
+        sd.grid(row=0, column=5, sticky="w", padx=(0, 10))
 
-            def logout():
-                minecraft.logout()
-                account_window.destroy()
-                open_account()
+        sf = ctk.CTkScrollableFrame(cf, fg_color="transparent")
+        sf.grid(row=1, column=0, sticky="nsew")
+        bind_mousewheel(sf)
 
-            ctk.CTkButton(content_frame, text="Cerrar Sesión", fg_color="#c42b1c", hover_color="#8b1e14", text_color="white", command=logout, height=40).pack(pady=20, padx=20, fill="x")
-        else:
-            ctk.CTkLabel(content_frame, text="Iniciar Sesión", font=("Arial", 18, "bold"), text_color="white").pack(anchor="w", pady=(10, 5))
-            ctk.CTkLabel(content_frame, text="Inicia sesión con tu cuenta de Microsoft para jugar con tu cuenta premium.", font=("Arial", 12), text_color="#aaaaaa", wraplength=500).pack(anchor="w", pady=(0, 15))
-
-            status_label = ctk.CTkLabel(content_frame, text="", font=("Arial", 12), text_color="white")
-            status_label.pack(pady=5)
-
-            code_display = ctk.CTkLabel(content_frame, text="---", font=("Arial", 28, "bold"), text_color="#00FF00")
-            code_display.pack(pady=10)
-
-            def start_login():
-                try:
-                    status_label.configure(text="Obteniendo código...")
-                    device_info = minecraft.get_device_code_info()
-                    code_display.configure(text=device_info.get("user_code", "Error"))
-                    status_label.configure(text="Ingresa este código en el navegador y espera...")
-
-                    import webbrowser
-                    webbrowser.open(device_info.get("verification_uri", ""))
-
-                    threading.Thread(target=do_login_poll, args=(device_info, account_window, status_label, code_display), daemon=True).start()
-                except Exception as e:
-                    status_label.configure(text=f"Error: {str(e)}", text_color="red")
-
-            ctk.CTkButton(content_frame, text="► Iniciar Sesión con Microsoft", fg_color="#00FF00", hover_color="#00cc00", text_color="black", command=start_login, height=50, font=("Arial", 16, "bold")).pack(pady=20, padx=20, fill="x")
-
-    def open_browse_mods(parent_window=None):
-        """Open the browse mods window to search for and download mods"""
-        browse_window = ctk.CTkToplevel(app)
-        browse_window.title("Browse Mods")
-        browse_window.geometry("900x600")
-        browse_window.after(10, browse_window.lift)
-        browse_window.configure(fg_color=BG_COLOR)
-
-        # Header
-        header_frame = ctk.CTkFrame(browse_window, fg_color=SIDEBAR_BG, corner_radius=0)
-        header_frame.pack(fill="x", pady=(0, 15))
-
-        ctk.CTkLabel(header_frame, text="🔍  Browse Mods", font=("Arial", 20, "bold")).pack(pady=15, padx=20, anchor="w")
-
-        # Controls frame (search, version, source)
-        controls_frame = ctk.CTkFrame(browse_window, fg_color="transparent")
-        controls_frame.pack(fill="x", padx=30, pady=10)
-
-        # Search bar
-        ctk.CTkLabel(controls_frame, text="Search:", font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 10))
-        search_var = ctk.StringVar()
-        search_entry = ctk.CTkEntry(controls_frame, textvariable=search_var, placeholder_text="Search mods...", width=300)
-        search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 20))
-
-        # Version selector
-        ctk.CTkLabel(controls_frame, text="Version:", font=("Arial", 12, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 10))
-        current_version = minecraft.load_settings()["version"]
-        available_versions = minecraft.get_available_versions()
-        version_dropdown = ctk.CTkOptionMenu(
-            controls_frame,
-            values=available_versions,
-            button_color="#114066",
-            button_hover_color="#0d3553",
-            text_color="#4A8FBF",
-            dropdown_text_color="white",
-            width=120
-        )
-        version_dropdown.set(current_version)
-        version_dropdown.grid(row=0, column=3, sticky="w", padx=(0, 20))
-
-        # Source selector
-        ctk.CTkLabel(controls_frame, text="Source:", font=("Arial", 12, "bold")).grid(row=0, column=4, sticky="w", padx=(0, 10))
-        source_var = ctk.StringVar(value="modrinth")
-        source_dropdown = ctk.CTkOptionMenu(
-            controls_frame,
-            values=["modrinth", "forge"],
-            command=lambda x: search_mods(),
-            button_color="#114066",
-            button_hover_color="#0d3553",
-            text_color="#4A8FBF",
-            dropdown_text_color="white",
-            width=120
-        )
-        source_dropdown.set("modrinth")
-        source_dropdown.grid(row=0, column=5, sticky="w", padx=(0, 10))
-
-        controls_frame.grid_columnconfigure(1, weight=1)
-
-        # Mods list frame with scrollbar
-        mods_frame = ctk.CTkFrame(browse_window, fg_color="transparent")
-        mods_frame.pack(fill="both", expand=True, padx=30, pady=10)
-
-        # Create a scrollable frame for mods
-        scrollable_frame = ctk.CTkScrollableFrame(mods_frame, fg_color="transparent")
-        scrollable_frame.pack(fill="both", expand=True)
-
-        def display_mods(mod_list):
-            """Display mods in the scrollable frame"""
-            # Clear existing mods
-            for widget in scrollable_frame.winfo_children():
-                widget.destroy()
-
+        def display(mod_list):
+            for w in sf.winfo_children(): w.destroy()
             if not mod_list:
-                ctk.CTkLabel(scrollable_frame, text="No mods found. Try a different search.", text_color="gray", font=("Arial", 12)).pack(pady=20)
+                ctk.CTkLabel(sf, text="No mods found.", text_color="gray", font=FONT_BODY).pack(pady=20)
                 return
+            preload_thumbnails(mod_list, max_thumbnails=6)
+            for m in mod_list:
+                card = ctk.CTkFrame(sf, fg_color=SIDEBAR_BG, corner_radius=8)
+                card.pack(fill="x", pady=5)
 
-            for mod in mod_list:
-                mod_card = ctk.CTkFrame(scrollable_frame, fg_color=SIDEBAR_BG, corner_radius=8)
-                mod_card.pack(fill="x", pady=5)
+                tf = ctk.CTkFrame(card, width=90, height=90, fg_color="#1f1f1f", corner_radius=10)
+                tf.pack(side="left", padx=(15, 10), pady=10)
+                tf.pack_propagate(False)
+                tl = ctk.CTkLabel(tf, text="📦", font=("Comic Neue", 28), text_color="#4A8FBF")
+                tl.pack(expand=True)
+                turl = m.get("thumbnail")
+                if turl:
+                    threading.Thread(target=lambda u=turl, l=tl: l.configure(image=ctk.CTkImage(light_image=load_mod_thumbnail(u), size=(64, 64)), text="") if load_mod_thumbnail(u) else None, daemon=True).start()
 
-                # Mod info frame
-                info_frame = ctk.CTkFrame(mod_card, fg_color="transparent")
-                info_frame.pack(fill="x", expand=True, padx=15, pady=10, side="left")
+                iff = ctk.CTkFrame(card, fg_color="transparent")
+                iff.pack(fill="x", expand=True, padx=(0, 15), pady=10, side="left")
+                ctk.CTkLabel(iff, text=m.get("name", "Unknown"), font=("Comic Neue", 14, "bold")).pack(anchor="w")
+                ctk.CTkLabel(iff, text=(m.get("description", "")[:100] + "..."), text_color="gray", font=FONT_SMALL).pack(anchor="w", pady=(2, 0))
+                ctk.CTkLabel(iff, text=f"Version: {m.get('version', 'N/A')} | Downloads: {m.get('downloads', 0)}", text_color="#888888", font=FONT_SMALL).pack(anchor="w", pady=(2, 0))
 
-                mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Arial", 14, "bold"))
-                mod_name.pack(anchor="w")
+                def dl(m=m):
+                    src = "modrinth" if sd.get() == "modrinth" else "forge"
+                    threading.Thread(target=lambda: mods.download_mod(m.get("mod_id"), vd.get(), source=src) if src == "modrinth" else mods.download_forge(vd.get()), daemon=True).start()
+                ctk.CTkButton(card, text="Download", fg_color=ACCENT_BLUE, hover_color="#0d3553", width=100, command=dl).pack(side="right", padx=15, pady=10)
 
-                mod_desc = ctk.CTkLabel(info_frame, text=mod.get("description", "")[:100] + "...", text_color="gray", font=("Arial", 10))
-                mod_desc.pack(anchor="w", pady=(2, 0))
-
-                mod_info = f"Version: {mod.get('version', 'N/A')} | Downloads: {mod.get('downloads', 0)}"
-                mod_info_label = ctk.CTkLabel(info_frame, text=mod_info, text_color="#888888", font=("Arial", 9))
-                mod_info_label.pack(anchor="w", pady=(2, 0))
-
-                # Download button
-                def download_handler(m=mod):
-                    source = source_dropdown.get()
-                    selected_version = version_dropdown.get()
-                    
-                    def download_thread():
-                        if source == "modrinth":
-                            mod_id = m.get("mod_id")
-                            result = mods.download_mod(mod_id, selected_version, source="modrinth")
-                            if result:
-                                print(f"✓ Downloaded {m.get('name')}!")
-                            else:
-                                print(f"✗ Failed to download {m.get('name')}")
-                        elif source == "forge":
-                            result = mods.download_forge(selected_version)
-                            if result:
-                                print(f"✓ Downloaded Forge for {selected_version}!")
-                            else:
-                                print(f"✗ Failed to download Forge")
-                    
-                    threading.Thread(target=download_thread, daemon=True).start()
-
-
-
-                download_btn = ctk.CTkButton(
-                    mod_card,
-                    text="Download",
-                    fg_color=ACCENT_BLUE,
-                    hover_color="#0d3553",
-                    width=100,
-                    command=download_handler
-                )
-                download_btn.pack(side="right", padx=15, pady=10)
-
-        def search_mods():
-            """Search for mods based on current filters"""
-            search_query = search_var.get() or "fabric"
-            selected_version = version_dropdown.get()
-            selected_source = source_dropdown.get()
-
-            # Show loading message
-            for widget in scrollable_frame.winfo_children():
-                widget.destroy()
-            ctk.CTkLabel(scrollable_frame, text="Searching...", text_color="gray", font=("Arial", 12)).pack(pady=20)
-
-            def search_thread():
+        def search():
+            q = sv.get() or "fabric"
+            for w in sf.winfo_children(): w.destroy()
+            ctk.CTkLabel(sf, text="🔍 Buscando mods...", text_color="#4A8FBF", font=FONT_BODY).pack(pady=30)
+            def t():
                 try:
-                    if selected_source == "modrinth":
-                        mod_list = mods.search_modrinth(search_query, version=selected_version)
-                    else:  # forge
-                        mod_list = mods.search_forge(selected_version)
+                    ml = mods.search_modrinth(q, version=vd.get()) if sd.get() == "modrinth" else mods.search_forge(vd.get())
+                    app.after(0, lambda: display(ml))
+                except:
+                    app.after(0, lambda: display([]))
+            threading.Thread(target=t, daemon=True).start()
 
-                    browse_window.after(0, lambda: display_mods(mod_list))
-                except Exception as e:
-                    print(f"Error searching mods: {e}")
-                    browse_window.after(0, lambda: display_mods([]))
+        ctk.CTkButton(controls, text="Search", fg_color=ACCENT_BLUE, hover_color="#0d3553", width=80, command=search).grid(row=0, column=6, sticky="e", padx=(10, 0))
 
-            threading.Thread(target=search_thread, daemon=True).start()
+        if cached_mods["loaded"] and cached_mods["trending"]:
+            display(cached_mods["trending"])
+        else:
+            search()
 
-        # Search button
-        search_btn = ctk.CTkButton(
-            controls_frame,
-            text="Search",
-            fg_color=ACCENT_BLUE,
-            hover_color="#0d3553",
-            width=80,
-            command=search_mods
-        )
-        search_btn.grid(row=0, column=6, sticky="e", padx=(10, 0))
+    # --- MODS PAGE ---
+    def show_mods():
+        clear_content()
+        nav_title.configure(text="📦  Mods Manager")
+        nav_back_btn.configure(command=lambda: show_home())
+        nav_back_btn.grid()
 
-        # Initial search
-        search_mods()
+        cf = ctk.CTkFrame(content_area, fg_color="transparent")
+        cf.grid(row=0, column=0, sticky="nsew", padx=40, pady=25)
+        cf.grid_columnconfigure(0, weight=1)
+        cf.grid_rowconfigure(1, weight=1)
 
-    def open_mods():
-        mods_window = ctk.CTkToplevel(app)
-        mods_window.title("Mods")
-        mods_window.geometry("800x500")
-        mods_window.after(10, mods_window.lift)
-        mods_window.configure(fg_color=BG_COLOR)
+        ctk.CTkLabel(cf, text="Installed Mods", font=FONT_HEADING).pack(anchor="w")
+        ctk.CTkLabel(cf, text="Manage your Minecraft mods here.", text_color="gray", font=FONT_BODY).pack(anchor="w", pady=(0, 20))
 
-        # Header
-        header_frame = ctk.CTkFrame(mods_window, fg_color=SIDEBAR_BG, corner_radius=0)
-        header_frame.pack(fill="x", pady=(0, 20))
+        mlf = ctk.CTkScrollableFrame(cf, fg_color=SIDEBAR_BG, corner_radius=10)
+        mlf.pack(fill="both", expand=True, pady=10)
+        bind_mousewheel(mlf)
 
-        ctk.CTkLabel(header_frame, text="📦  Mods Manager", font=("Arial", 20, "bold")).pack(pady=20, padx=20, anchor="w")
-
-        # Content
-        content_frame = ctk.CTkFrame(mods_window, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=30, pady=20)
-
-        # Title and description
-        ctk.CTkLabel(content_frame, text="Installed Mods", font=("Arial", 18, "bold")).pack(anchor="w")
-        ctk.CTkLabel(content_frame, text="Manage your Minecraft mods here.", text_color="gray", font=("Arial", 12)).pack(anchor="w", pady=(0, 20))
-
-        # Mods list (scrollable)
-        mods_list_frame = ctk.CTkScrollableFrame(content_frame, fg_color=SIDEBAR_BG, corner_radius=10)
-        mods_list_frame.pack(fill="both", expand=True, pady=10)
-
-        def refresh_mods_list():
-            """Refresh and display installed mods"""
-            # Clear existing widgets
-            for widget in mods_list_frame.winfo_children():
-                widget.destroy()
-
-            installed_mods = mods.get_installed_mods()
-
-            if not installed_mods:
-                ctk.CTkLabel(
-                    mods_list_frame,
-                    text="No mods installed yet.\nClick 'Browse Mods' to get started!",
-                    text_color="gray",
-                    font=("Arial", 12),
-                    justify="center"
-                ).pack(fill="both", expand=True, pady=20)
+        def refresh():
+            for w in mlf.winfo_children(): w.destroy()
+            mods_list = mods.get_installed_mods()
+            if not mods_list:
+                ctk.CTkLabel(mlf, text="No mods installed yet.\nClick 'Browse Mods' to get started!", text_color="gray", font=FONT_BODY, justify="center").pack(fill="both", expand=True, pady=20)
             else:
-                for mod in installed_mods:
-                    mod_card = ctk.CTkFrame(mods_list_frame, fg_color=BG_COLOR, corner_radius=8)
-                    mod_card.pack(fill="x", pady=5, padx=5)
+                for m in mods_list:
+                    card = ctk.CTkFrame(mlf, fg_color=BG_COLOR, corner_radius=8)
+                    card.pack(fill="x", pady=5, padx=5)
+                    iff = ctk.CTkFrame(card, fg_color="transparent")
+                    iff.pack(fill="x", expand=True, padx=10, pady=10, side="left")
+                    ctk.CTkLabel(iff, text=m.get("name", "Unknown"), font=("Comic Neue", 12, "bold")).pack(anchor="w")
+                    ctk.CTkLabel(iff, text=f"Size: {m.get('size', 0) / (1024*1024):.2f} MB", text_color="gray", font=FONT_SMALL).pack(anchor="w", pady=(2, 0))
+                    ctk.CTkButton(card, text="Delete", fg_color="#D32F2F", hover_color="#B71C1C", width=80, command=lambda fn=m.get("filename"): [mods.delete_mod(fn), refresh()]).pack(side="right", padx=10, pady=10)
 
-                    # Mod info
-                    info_frame = ctk.CTkFrame(mod_card, fg_color="transparent")
-                    info_frame.pack(fill="x", expand=True, padx=10, pady=10, side="left")
+        bf = ctk.CTkFrame(cf, fg_color="transparent")
+        bf.pack(fill="x", pady=(20, 0))
+        ctk.CTkButton(bf, text="Browse Mods", fg_color=ACCENT_BLUE, hover_color="#0d3553", command=show_browse_mods).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(bf, text="Refresh", fg_color="transparent", border_width=1, border_color=ACCENT_BLUE, text_color=ACCENT_BLUE, command=refresh).pack(side="left")
+        refresh()
 
-                    mod_name = ctk.CTkLabel(info_frame, text=mod.get("name", "Unknown"), font=("Arial", 12, "bold"))
-                    mod_name.pack(anchor="w")
+    # --- SETTINGS PAGE ---
+    def show_settings():
+        clear_content()
+        nav_title.configure(text="⚙  Settings")
+        nav_back_btn.configure(command=lambda: show_home())
+        nav_back_btn.grid()
 
-                    mod_size = f"Size: {mod.get('size', 0) / (1024*1024):.2f} MB"
-                    mod_size_label = ctk.CTkLabel(info_frame, text=mod_size, text_color="gray", font=("Arial", 10))
-                    mod_size_label.pack(anchor="w", pady=(2, 0))
+        body = ctk.CTkFrame(content_area, fg_color="transparent")
+        body.grid(row=0, column=0, sticky="nsew", padx=30, pady=20)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
 
-                    # Delete button
-                    def delete_handler(filename=mod.get("filename")):
-                        mods.delete_mod(filename)
-                        refresh_mods_list()
+        tabs = ctk.CTkTabview(body, fg_color=BG_COLOR, segmented_button_fg_color=SIDEBAR_BG,
+                              segmented_button_selected_color=ACCENT_BLUE, segmented_button_selected_hover_color="#0d3553",
+                              text_color="white")
+        tabs.grid(row=0, column=0, sticky="nsew")
 
-                    delete_btn = ctk.CTkButton(
-                        mod_card,
-                        text="Delete",
-                        fg_color="#D32F2F",
-                        hover_color="#B71C1C",
-                        width=80,
-                        command=delete_handler
-                    )
-                    delete_btn.pack(side="right", padx=10, pady=10)
+        tab_appearance = tabs.add("🎨 Appearance")
+        tab_java = tabs.add("☕ Java & Memory")
+        tab_language = tabs.add("🌐 Language")
+        tab_privacy = tabs.add("🛡️ Privacy")
 
-        # Buttons
-        button_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        button_frame.pack(fill="x", pady=(20, 0))
+        ctk.CTkLabel(tab_appearance, text="Customize the look of Stella Client", text_color="gray", font=FONT_BODY).pack(anchor="w", pady=(0, 25))
+        ctk.CTkLabel(tab_appearance, text="Color theme", font=FONT_SUBHEADING).pack(anchor="w", pady=(0, 15))
+        tr = ctk.CTkFrame(tab_appearance, fg_color="transparent")
+        tr.pack(anchor="w")
+        for name in ["Dark", "Light", "OLED"]:
+            box = ctk.CTkFrame(tr, width=150, height=100, corner_radius=10, border_width=1, border_color="#444444")
+            box.pack(side="left", padx=(0, 12))
+            box.pack_propagate(0)
+            ctk.CTkFrame(box, fg_color="#111111" if name != "Light" else "#DDDDDD", height=40, corner_radius=5).pack(fill="x", padx=10, pady=(15, 5))
+            ctk.CTkLabel(box, text=name, font=FONT_BODY).pack(side="bottom", pady=5)
+        ctk.CTkLabel(tab_appearance, text="Rendering", font=FONT_SUBHEADING).pack(anchor="w", pady=(30, 15))
+        rf = ctk.CTkFrame(tab_appearance, fg_color="transparent")
+        rf.pack(fill="x")
+        ctk.CTkLabel(rf, text="Advanced rendering effects", text_color="gray", font=FONT_BODY).pack(side="left")
+        ctk.CTkSwitch(rf, text="", progress_color=ACCENT_BLUE).pack(side="right")
 
-        browse_btn = ctk.CTkButton(
-            button_frame,
-            text="Browse Mods",
-            fg_color=ACCENT_BLUE,
-            hover_color="#0d3553",
-            command=open_browse_mods
-        )
-        browse_btn.pack(side="left", padx=(0, 10))
+        s = minecraft.load_settings()
+        ctk.CTkLabel(tab_java, text="Configure how much RAM to allocate.", text_color="gray", font=FONT_BODY).pack(anchor="w", pady=(0, 25))
+        rl = ctk.CTkLabel(tab_java, text=f"Allocated Memory: {s['ram']} GB", font=("Comic Neue", 28, "bold"), text_color="#4A8FBF")
+        rl.pack(anchor="w", pady=(15, 10))
+        def update_ram(v):
+            val = int(v)
+            rl.configure(text=f"Allocated Memory: {val} GB")
+            c = minecraft.load_settings()
+            c["ram"] = val
+            minecraft.save_settings(c)
+        rs = ctk.CTkSlider(tab_java, from_=2, to=16, number_of_steps=14,
+            button_color=ACCENT_BLUE, progress_color=ACCENT_BLUE, command=update_ram, height=20)
+        rs.set(s['ram'])
+        rs.pack(fill="x", pady=(10, 15))
+        ctk.CTkLabel(tab_java, text="Too much RAM can slow down your system.", font=FONT_SMALL, text_color="gray").pack(anchor="w")
 
-        refresh_btn = ctk.CTkButton(
-            button_frame,
-            text="Refresh",
-            fg_color="transparent",
-            border_width=1,
-            border_color=ACCENT_BLUE,
-            text_color=ACCENT_BLUE,
-            command=refresh_mods_list
-        )
-        refresh_btn.pack(side="left")
+        ctk.CTkLabel(tab_language, text="Select your preferred language.", text_color="gray", font=FONT_BODY).pack(anchor="w", pady=(0, 25))
+        ctk.CTkLabel(tab_language, text="Language", font=FONT_SUBHEADING).pack(anchor="w", pady=(10, 15))
+        ctk.CTkOptionMenu(tab_language,
+            values=["English", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Korean", "Chinese"],
+            button_color="#114066", button_hover_color="#0d3553", font=FONT_BODY, width=250).pack(anchor="w")
 
-        # Initial display
-        refresh_mods_list()
+        ctk.CTkLabel(tab_privacy, text="Configure your privacy settings.", text_color="gray", font=FONT_BODY).pack(anchor="w", pady=(0, 25))
+        pf = ctk.CTkFrame(tab_privacy, fg_color=SIDEBAR_BG, corner_radius=10)
+        pf.pack(fill="x", pady=(10, 0))
+        for i, t in enumerate(["Send crash reports", "Send usage statistics", "Show online status to friends"]):
+            frame = ctk.CTkFrame(pf, fg_color="transparent")
+            frame.pack(fill="x", padx=15, pady=5)
+            ctk.CTkLabel(frame, text=t, font=FONT_BODY).pack(side="left")
+            ctk.CTkSwitch(frame, text="", progress_color=ACCENT_BLUE).pack(side="right")
+            if i < 2:
+                ctk.CTkFrame(pf, fg_color="#333333", height=1).pack(fill="x", padx=15)
 
+    # --- TRANSICIÓN SPLASH A MAIN ---
+    def show_main():
+        if not ui_ready["value"]:
+            app.after(100, show_main)
+            return
+        splash_frame.grid_remove()
+        main_container.grid()
+        show_home()
 
+    app.after(100, show_main)
 
-    def open_settings():
-        settings_window = ctk.CTkToplevel(app)
-        settings_window.title("Settings")
-        settings_window.geometry("850x600")
-        settings_window.after(10, settings_window.lift)
-
-        settings_window.configure(fg_color=BG_COLOR)
-
-        # Dividimos en 2 columnas: 0 (Menú) y 1 (Contenido)
-        settings_window.grid_columnconfigure(1, weight=1)
-        settings_window.grid_rowconfigure(0, weight=1)
-
-        # --- SIDEBAR (IZQUIERDA) ---
-        sidebar_frame = ctk.CTkFrame(settings_window, width=240, corner_radius=0, fg_color=SIDEBAR_BG)
-        sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        sidebar_frame.grid_rowconfigure(10, weight=1) # Empuja lo de abajo
-
-        # Título del sidebar
-        label_title = ctk.CTkLabel(sidebar_frame, text="⚙  Settings", font=("Arial", 18, "bold"))
-        label_title.pack(pady=25, padx=20, anchor="w")
-
-        # --- CONTENIDO (DERECHA) ---
-        content_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
-        content_frame.grid(row=0, column=1, sticky="nsew", padx=30, pady=25)
-
-        # FUNCIÓN MÁGICA: Cambia lo que se ve a la derecha
-        current_page = "Appearance"
-
-        def update_menu_buttons(selected_text):
-            for text, btn in menu_buttons.items():
-                if text == selected_text:
-                    btn.configure(fg_color="#114066", hover_color="#0d3553")
-                else:
-                    btn.configure(fg_color="transparent", hover_color="#333333")
-
-        def select_page(page_name):
-            nonlocal current_page
-            # Si ya está en esta página, no hacer nada
-            if current_page == page_name:
-                return
-            
-            current_page = page_name
-            update_menu_buttons(page_name)
-
-            # Limpiar todo lo que haya antes
-            for widget in content_frame.winfo_children():
-                widget.destroy()
-
-            if page_name == "Appearance":
-                # Título y descripción
-                ctk.CTkLabel(content_frame, text="Appearance", font=("Arial", 24, "bold")).pack(anchor="w")
-                ctk.CTkLabel(content_frame, text="Customize the look of Stella Client.", text_color="gray").pack(anchor="w", pady=(0, 20))
-
-                # Sección de Temas
-                ctk.CTkLabel(content_frame, text="Color theme", font=("Arial", 16, "bold")).pack(anchor="w", pady=10)
-
-                themes_row = ctk.CTkFrame(content_frame, fg_color="transparent")
-                themes_row.pack(fill="x")
-
-                # Cajas de tema (Simuladas como en tu diseño de Modrinth)
-                for name in ["Dark", "Light", "OLED"]:
-                    box = ctk.CTkFrame(themes_row, width=160, height=100, corner_radius=10, border_width=1, border_color="#333333")
-                    box.pack(side="left", padx=10)
-                    box.pack_propagate(0) # Evita que la caja se encoja al contenido
-
-                    # Mini preview del tema
-                    preview = ctk.CTkFrame(box, fg_color="#111111" if name != "Light" else "#DDDDDD", height=40, corner_radius=5)
-                    preview.pack(fill="x", padx=10, pady=(15, 5))
-
-                    ctk.CTkLabel(box, text=name, font=("Arial", 12)).pack(side="bottom", pady=5)
-
-                # Switch de Renderizado Avanzado
-                ctk.CTkLabel(content_frame, text="Rendering", font=("Arial", 16, "bold")).pack(anchor="w", pady=(30, 10))
-
-                render_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-                render_frame.pack(fill="x")
-
-                ctk.CTkLabel(render_frame, text="Advanced rendering effects", text_color="gray").pack(side="left")
-                ctk.CTkSwitch(render_frame, text="", progress_color=ACCENT_BLUE).pack(side="right")
-
-            elif page_name == "Java":
-                # 1. Cargar los ajustes actuales desde minecraft.py
-                settings = minecraft.load_settings()
-
-                # 2. Título y descripción
-                ctk.CTkLabel(content_frame, text="Java & Memory", font=("Arial", 24, "bold")).pack(anchor="w")
-                ctk.CTkLabel(content_frame, text="Configure how much RAM Stella Client can use.", text_color="gray").pack(anchor="w", pady=(0, 20))
-
-                # 3. Label dinámico de RAM
-                ram_label = ctk.CTkLabel(content_frame, text=f"Allocated Memory: {settings['ram']} GB", font=("Arial", 16, "bold"))
-                ram_label.pack(anchor="w", pady=(10, 0))
-
-                def update_ram(value):
-                    val = int(value)
-                    ram_label.configure(text=f"Allocated Memory: {val} GB")
-                    current_conf = minecraft.load_settings()
-                    current_conf["ram"] = val
-                    minecraft.save_settings(current_conf)
-
-                # 4. Slider
-                ram_slider = ctk.CTkSlider(
-                    content_frame,
-                    from_=2,
-                    to=16,
-                    number_of_steps=14,
-                    button_color=ACCENT_BLUE,
-                    progress_color=ACCENT_BLUE,
-                    command=update_ram
-                )
-                ram_slider.set(settings['ram'])
-                ram_slider.pack(fill="x", pady=10)
-
-                ctk.CTkLabel(
-                    content_frame,
-                    text="Note: Allocating too much RAM can slow down your system.",
-                    font=("Arial", 12),
-                    text_color="gray"
-                ).pack(anchor="w")
-
-            elif page_name == "Language":
-                ctk.CTkLabel(content_frame, text="Language", font=("Arial", 24, "bold")).pack(anchor="w")
-                ctk.CTkLabel(content_frame, text="Select your preferred language.", text_color="gray").pack(anchor="w", pady=(0, 20))
-                ctk.CTkLabel(content_frame, text="Language", font=("Arial", 16, "bold")).pack(anchor="w", pady=10)
-                language_dropdown = ctk.CTkOptionMenu(content_frame, values=["English", "Spanish", "French", "German", "Italian", "Portuguese", "Japanese", "Korean", "Chinese"], button_color="#114066", button_hover_color="#0d3553")
-                language_dropdown.set("English")
-                language_dropdown.pack(anchor="w")
-
-            elif page_name == "Privacy":
-                ctk.CTkLabel(content_frame, text="Privacy", font=("Arial", 24, "bold")).pack(anchor="w")
-                ctk.CTkLabel(content_frame, text="Configure your privacy settings.", text_color="gray").pack(anchor="w", pady=(0, 20))
-                privacy_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-                privacy_frame.pack(fill="x", pady=10)
-                ctk.CTkSwitch(privacy_frame, text="Send crash reports", progress_color=ACCENT_BLUE).pack(anchor="w", pady=5)
-                ctk.CTkSwitch(privacy_frame, text="Send usage statistics", progress_color=ACCENT_BLUE).pack(anchor="w", pady=5)
-                ctk.CTkSwitch(privacy_frame, text="Show online status to friends", progress_color=ACCENT_BLUE).pack(anchor="w", pady=5)
-
-        # --- BOTONES DEL SIDEBAR ---
-        menu_buttons = {}
-
-        def create_menu_btn(text, icon):
-            btn = ctk.CTkButton(
-                sidebar_frame,
-                text=f"{icon}  {text}",
-                anchor="w",
-                fg_color="transparent",
-                hover_color="#333333",
-                height=40,
-                command=lambda: select_page(text)
-            )
-            menu_buttons[text] = btn
-            return btn
-
-        create_menu_btn("Appearance", "🎨").pack(fill="x", padx=10, pady=2)
-        create_menu_btn("Language", "🌐").pack(fill="x", padx=10, pady=2)
-        create_menu_btn("Privacy", "🛡️").pack(fill="x", padx=10, pady=2)
-        create_menu_btn("Java", "☕").pack(fill="x", padx=10, pady=2)
-
-        # Información de versión abajo
-        info_label = ctk.CTkLabel(sidebar_frame, text="Stella Client 0.1.0\nLinux 6.8.0", font=("Arial", 10), text_color="gray")
-        info_label.pack(side="bottom", pady=20)
-
-        # Iniciar mostrando Appearance
-        update_menu_buttons("Appearance")
-        select_page("Appearance")
-
-    # Configure grid layout for the main window
-    app.grid_columnconfigure(0, weight=1)
-    app.grid_columnconfigure(1, weight=0)  # Right column for buttons (no weight to stay fixed width)
-    app.grid_rowconfigure(0, weight=0)
-    app.grid_rowconfigure(1, weight=1)
-    app.grid_rowconfigure(2, weight=0)
-
-    # --- ROW 0: TITLE + ACCOUNT BUTTON ---
-    title_frame = ctk.CTkFrame(app, fg_color="transparent")
-    title_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(40, 20), padx=40)
-    title_frame.grid_columnconfigure(0, weight=1)
-
-    # Título con gradiente simulado
-    title_label = ctk.CTkLabel(title_frame, text="Stella Client", font=FONT_TITLE, text_color="#FFFFFF")
-    title_label.grid(row=0, column=0, sticky="w")
-
-    # Botón de cuenta mejorado
-    current_user = minecraft.get_current_user()
-    account_text = f"👤 {current_user[:15]}" if current_user else "👤 Account"
-    
-    account_btn = ctk.CTkButton(
-        title_frame,
-        text=account_text,
-        width=140,
-        height=42,
-        fg_color=CARD_BG,
-        border_color=ACCENT_BLUE,
-        border_width=2,
-        hover_color="#3D3D3D",
-        font=FONT_BODY,
-        command=open_account
-    )
-    account_btn.grid(row=0, column=1, sticky="e")
-
-    # --- ROW 1: PLAY BUTTON + VERSION DROPDOWN ---
-    play_frame = ctk.CTkFrame(app, fg_color="transparent")
-    play_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=20)
-    play_frame.grid_columnconfigure(0, weight=1)
-
-    # Play button (left-ish, centered)
-    def launch_game():
-        def game_thread():
-            # Check if version will change due to mod compatibility
-            settings = minecraft.load_settings()
-            original_version = settings["version"]
-            
-            # Update RPC to playing status
-            discord_rpc.update_playing()
-            
-            # Launch the game (this may change the version internally)
-            minecraft.launch_minecraft()
-            
-            # Check if version was changed
-            new_settings = minecraft.load_settings()
-            if new_settings["version"] != original_version:
-                # Show warning about version change
-                def show_warning():
-                    warning = ctk.CTkToplevel(app)
-                    warning.title("Version Changed")
-                    warning.geometry("500x200")
-                    warning.after(10, warning.lift)
-                    warning.configure(fg_color=BG_COLOR)
-                    
-                    ctk.CTkLabel(
-                        warning, 
-                        text="⚠️ Version Auto-Changed", 
-                        font=("Arial", 16, "bold")
-                    ).pack(pady=20)
-                    
-                    ctk.CTkLabel(
-                        warning, 
-                        text=f"The game version was automatically changed from {original_version} to {new_settings['version']}\nto be compatible with your installed mods.\n\nPlease re-download mods from the Mods menu for the new version.",
-                        font=("Arial", 12),
-                        justify="center"
-                    ).pack(pady=10, padx=20)
-                    
-                    ctk.CTkButton(
-                        warning,
-                        text="OK",
-                        command=warning.destroy,
-                        fg_color=ACCENT_BLUE,
-                        hover_color="#0d3553"
-                    ).pack(pady=20)
-                
-                app.after(1000, show_warning)  # Show warning after 1 second
-            
-            # Update RPC back to menu when done
-            discord_rpc.update_menu()
-
-        threading.Thread(target=game_thread, daemon=True).start()
-
-    play_btn = ctk.CTkButton(
-        play_frame,
-        text="▶  PLAY",
-        font=FONT_SUBHEADING,
-        height=65,
-        width=220,
-        fg_color=ACCENT_BLUE,
-        hover_color="#0d3553",
-        border_width=0,
-        corner_radius=12,
-        command=launch_game
-    )
-    play_btn.grid(row=0, column=0, sticky="ew", padx=(0, 15))
-
-    # Version dropdown (right side)
-    def on_version_change(selected_version):
-        minecraft.set_version(selected_version)
-
-    available_versions = minecraft.get_available_versions()
-    current_version = minecraft.load_settings()["version"]
-
-    version_dropdown = ctk.CTkOptionMenu(
-        play_frame,
-        values=available_versions,
-        command=on_version_change,
-        button_color="#114066",
-        button_hover_color="#0d3553",
-        text_color="#4A8FBF",
-        fg_color=CARD_BG,
-        font=FONT_BODY
-    )
-    version_dropdown.set(current_version)
-    version_dropdown.grid(row=0, column=1, sticky="e", padx=(10, 0))
-
-    # --- ROW 2: MODS + SETTINGS BUTTONS (bottom right) ---
-    bottom_frame = ctk.CTkFrame(app, fg_color="transparent")
-    bottom_frame.grid(row=2, column=0, columnspan=2, sticky="se", padx=40, pady=(10, 25))
-
-    buttons_stack = ctk.CTkFrame(bottom_frame, fg_color="transparent")
-    buttons_stack.pack()
-
-    mods_btn = ctk.CTkButton(
-        buttons_stack,
-        text="📦  Mods",
-        width=130,
-        height=42,
-        fg_color=CARD_BG,
-        border_color="#3a3a3a",
-        border_width=1,
-        hover_color="#3D3D3D",
-        font=FONT_BODY,
-        command=open_mods
-    )
-    mods_btn.pack(pady=(0, 8))
-
-    settings_btn = ctk.CTkButton(
-        buttons_stack,
-        text="⚙  Settings",
-        width=130,
-        height=42,
-        fg_color=CARD_BG,
-        border_color="#3a3a3a",
-        border_width=1,
-        hover_color="#3D3D3D",
-        font=FONT_BODY,
-        command=open_settings
-    )
-    settings_btn.pack()
-
-    # Initialize Discord RPC on app start (in background thread to avoid blocking UI)
     def init_rpc_thread():
-        import time as time_module
-        time_module.sleep(1)  # Give Discord time to detect the app
-        print("\n" + "=" * 50)
-        print("DISCORD RPC INITIALIZATION")
-        print("=" * 50)
+        time.sleep(1)
         discord_rpc.init_rpc()
         discord_rpc.update_menu()
-        print("=" * 50 + "\n")
+    threading.Thread(target=init_rpc_thread, daemon=True).start()
 
-    rpc_thread = threading.Thread(target=init_rpc_thread, daemon=True)
-    rpc_thread.start()
-
-    # Close RPC on app close
     def on_closing():
         discord_rpc.close_rpc()
         app.destroy()
-
     app.protocol("WM_DELETE_WINDOW", on_closing)
     app.mainloop()
