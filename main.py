@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -7,6 +8,7 @@ import threading
 import webview
 
 import launcher.discord_rpc as discord_rpc
+import launcher.instances as instances
 import launcher.minecraft as minecraft
 from api import API
 
@@ -19,6 +21,7 @@ def ensure_dirs():
 
 def start_ui():
     ensure_dirs()
+    instances.ensure_default_instance()
     settings = minecraft.load_settings()
     api = API()
 
@@ -36,10 +39,15 @@ def start_ui():
         min_size=(800, 450),
         resizable=True,
         fullscreen=False,
+        maximized=True,
+        frameless=True,
+        easy_drag=False,
         background_color="#0a0a0a",
     )
 
-    webview.start(debug=True)
+    api._window = window
+
+    webview.start(debug=False)
 
 
 if __name__ == "__main__":

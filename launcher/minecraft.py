@@ -1,3 +1,4 @@
+import logging
 import subprocess
 import minecraft_launcher_lib
 import minecraft_launcher_lib.microsoft_account as microsoft_account
@@ -120,7 +121,7 @@ def complete_login_with_browser(callback_url, state, code_verifier):
         save_auth(auth_info)
         return profile["name"]
     except Exception as e:
-        print(f"Error en login: {e}")
+        logging.info(f"Error en login: {e}")
         return None
 
 def logout():
@@ -164,16 +165,16 @@ class OAuthCallbackHandler(http.server.SimpleHTTPRequestHandler):
 
 def login_with_microsoft(callback=None):
     """Inicia el proceso de login con Microsoft."""
-    print("Iniciando sesión con Microsoft...")
+    logging.info("Iniciando sesión con Microsoft...")
     url, state, code_verifier = get_login_url()
 
-    print("Abriendo navegador...")
+    logging.info("Abriendo navegador...")
     browser = webbrowser.get('xdg-open')
     browser.open(url)
 
-    print("\nDespués de iniciar sesión, serás redirigido a una página.")
-    print("Copia la URL de esa página (desde https://login.live.com/...)")
-    print("y pégala aquí:")
+    logging.info("\nDespués de iniciar sesión, serás redirigido a una página.")
+    logging.info("Copia la URL de esa página (desde https://login.live.com/...)")
+    logging.info("y pégala aquí:")
 
     callback_url = input("URL completa: ").strip()
 
@@ -184,7 +185,7 @@ def login_with_microsoft(callback=None):
                 callback(result)
             return result
         except Exception as e:
-            print(f"Error: {e}")
+            logging.info(f"Error: {e}")
     return None
 
 def get_current_user():
@@ -228,7 +229,7 @@ def complete_login_with_browser_from_url(callback_url):
             code_verifier
         )
 
-        print(f"Login completo. Usuario: {result['profile']['name']}")
+        logging.info(f"Login completo. Usuario: {result['profile']['name']}")
 
         auth_info = {
             "access_token": result["authorization_token"]["access_token"],
@@ -243,14 +244,24 @@ def complete_login_with_browser_from_url(callback_url):
         save_auth(auth_info)
         return result["profile"]["name"]
     except Exception as e:
-        print(f"Error en login: {e}")
+        logging.info(f"Error en login: {e}")
         import traceback
         traceback.print_exc()
         return None
 
 def get_available_versions():
-    """Returns a list of available Minecraft versions."""
-    return ["1.21.11", "1.21.1", "1.21", "1.20.4", "1.20.1", "1.20", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.13.2", "1.12.2", "1.11.2", "1.10.2", "1.9.4", "1.8.9"]
+    """Returns a list of available Minecraft versions, newest first."""
+    try:
+        manifest = minecraft_launcher_lib.utils.get_version_list()
+        all_v = [v["id"] for v in manifest if v["type"] == "release"]
+        filtered = [v for v in all_v if v.startswith(("26.", "1.8","1.9","1.10","1.11","1.12","1.13","1.14","1.15","1.16","1.17","1.18","1.19","1.20","1.21"))]
+        def sort_key(v):
+            parts = v.split(".")
+            return [int(x) for x in parts]
+        filtered.sort(key=sort_key, reverse=True)
+        return filtered
+    except:
+        return ["26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.1", "1.21", "1.20.4", "1.20.1", "1.20", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.13.2", "1.12.2", "1.11.2", "1.10.2", "1.9.4", "1.8.9"]
 
 def set_version(version):
     """Updates the selected Minecraft version in settings."""
@@ -259,86 +270,37 @@ def set_version(version):
     save_settings(settings)
     return version
 
-def get_compatible_version_for_mods():
-    """Determine the best Minecraft version for installed mods"""
-    mods_dir = os.path.join(MINECRAFT_DIR, "mods")
-    if not os.path.exists(mods_dir):
-        return None
-    
-    # Check installed mods for version requirements
-    compatible_versions = []
-    for filename in os.listdir(mods_dir):
-        if filename.endswith('.jar'):
-            # Extract version from filename (basic heuristic)
-            if 'mc1.20.1' in filename or '1.20.1' in filename:
-                compatible_versions.append("1.20.1")
-            elif 'mc1.21' in filename or '1.21' in filename:
-                # Extract specific version
-                if '1.21.11' in filename:
-                    compatible_versions.append("1.21.11")
-                elif '1.21.10' in filename:
-                    compatible_versions.append("1.21.10")
-                elif '1.21.9' in filename:
-                    compatible_versions.append("1.21.9")
-                else:
-                    compatible_versions.append("1.21.11")  # Default to latest
-    
-    if compatible_versions:
-        # For mod compatibility, we need the LOWEST version that satisfies all mods
-        # since mods are typically backward compatible but not forward compatible
-        # Sort versions and return the lowest one
-        def version_key(v):
-            parts = v.split('.')
-            return [int(x) for x in parts]
-        
-        compatible_versions.sort(key=version_key)
-        return compatible_versions[0]  # Return lowest version
-    
-    return None
-
 def launch_minecraft():
     # 1. Cargar configuración
     settings = load_settings()
     version = settings["version"]
     ram_argument = f"-Xmx{settings['ram']}G"
 
-    print(f"--- Iniciando Stella Client ---")
-    print(f"Versión configurada: {version}")
-    print(f"Asignando: {ram_argument}")
+    logging.info(f"--- Iniciando Stella Client ---")
+    logging.info(f"Versión configurada: {version}")
+    logging.info(f"Asignando: {ram_argument}")
 
     # 2. Asegurar que el directorio existe
     if not os.path.exists(MINECRAFT_DIR):
         os.makedirs(MINECRAFT_DIR, exist_ok=True)
 
     # 3. Verificar si hay mods instalados
-    mods_dir = os.path.join(MINECRAFT_DIR, "mods")
+    mods_dir = os.environ.get("STELLA_MODS_DIR", os.path.join(MINECRAFT_DIR, "mods"))
     has_mods = os.path.exists(mods_dir) and len([f for f in os.listdir(mods_dir) if f.endswith('.jar')]) > 0
 
     if has_mods:
-        print("Mods detectados - verificando compatibilidad...")
-        
-        # Check if current version is compatible with mods
-        compatible_version = get_compatible_version_for_mods()
-        if compatible_version and compatible_version != version:
-            print(f"⚠️  Cambiando versión a {compatible_version} para compatibilidad con mods")
-            print("⚠️  IMPORTANTE: Re-descarga los mods desde el menú de mods para la nueva versión")
-            version = compatible_version
-            # Update settings
-            settings["version"] = version
-            save_settings(settings)
-        
-        print(f"Instalando Fabric para {version}...")
+        logging.info(f"Instalando Fabric para {version}...")
         try:
             minecraft_launcher_lib.fabric.install_fabric(version, MINECRAFT_DIR)
-            print("✓ Fabric instalado correctamente")
+            logging.info("✓ Fabric instalado correctamente")
         except Exception as e:
-            print(f"Error instalando Fabric: {e}")
+            logging.info(f"Error instalando Fabric: {e}")
             # Fallback a vanilla si Fabric falla
             has_mods = False
 
     if not has_mods:
         # Instalar versión vanilla
-        print(f"Instalando Minecraft {version} (vanilla)...")
+        logging.info(f"Instalando Minecraft {version} (vanilla)...")
         minecraft_launcher_lib.install.install_minecraft_version(
             version,
             MINECRAFT_DIR
@@ -347,7 +309,7 @@ def launch_minecraft():
     # 4. Verificar autenticación
     auth = load_auth()
     if auth and "mc_access_token" in auth:
-        print(f"Jugando como: {auth['username']}")
+        logging.info(f"Jugando como: {auth['username']}")
         options = {
             "username": auth["username"],
             "uuid": auth["uuid"],
@@ -356,7 +318,7 @@ def launch_minecraft():
             "jvmArguments": [ram_argument, "-XX:+UseG1GC"]
         }
     else:
-        print("Jugando en modo offline")
+        logging.info("Jugando en modo offline")
         options = {
             "username": settings["username"],
             "uuid": "00000000000000000000000000000000",
@@ -370,7 +332,7 @@ def launch_minecraft():
         # Usar versión de Fabric (el nombre que crea Fabric)
         loader_version = minecraft_launcher_lib.fabric.get_latest_loader_version()
         fabric_version = f"fabric-loader-{loader_version}-{version}"
-        print(f"Lanzando con Fabric (con mods) - versión: {fabric_version}...")
+        logging.info(f"Lanzando con Fabric (con mods) - versión: {fabric_version}...")
         command = minecraft_launcher_lib.command.get_minecraft_command(
             fabric_version,
             MINECRAFT_DIR,
@@ -378,19 +340,30 @@ def launch_minecraft():
         )
     else:
         # Usar comando vanilla
-        print("Lanzando vanilla...")
+        logging.info("Lanzando vanilla...")
         command = minecraft_launcher_lib.command.get_minecraft_command(
             version,
             MINECRAFT_DIR,
             options
         )
 
-    # 6. Ejecutar el juego
-    print("Lanzando proceso...")
+    # 6. Filtrar flags JVM no soportados (Java 21 no reconoce --sun-misc-unsafe-memory-access)
+    filtered = []
+    skip_next = False
+    for arg in command:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("--sun-misc-unsafe-memory-access"):
+            continue
+        filtered.append(arg)
+
+    # 7. Ejecutar el juego
+    logging.info("Lanzando proceso...")
     try:
-        subprocess.run(command)
+        subprocess.run(filtered)
     except Exception as e:
-        print(f"Error al lanzar el juego: {e}")
+        logging.info(f"Error al lanzar el juego: {e}")
 
 if __name__ == "__main__":
     launch_minecraft()

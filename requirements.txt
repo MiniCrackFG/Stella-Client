@@ -1,5 +1,4 @@
 pywebview>=6.2
-customtkinter>=5.2.2
 minecraft-launcher-lib>=8.0
 Pillow>=12.0
 requests>=2.31

@@ -1,3 +1,4 @@
+import logging
 import requests
 import json
 import os
@@ -6,34 +7,44 @@ from pathlib import Path
 
 MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
 MODS_DIR = Path(MINECRAFT_DIR) / "mods"
-INSTALLED_MODS_FILE = os.path.join(MINECRAFT_DIR, "installed_mods.json")
 _install_lock = threading.Lock()
+
+
+def _installed_file():
+    mods_dir = get_mods_dir()
+    return os.path.join(str(mods_dir.parent), "installed_mods.json")
 
 
 def save_installed_mod_info(mod_id, filename, project_type="mod", thumbnail=""):
     with _install_lock:
         data = {}
-        if os.path.exists(INSTALLED_MODS_FILE):
-            with open(INSTALLED_MODS_FILE) as f:
+        if os.path.exists(_installed_file()):
+            with open(_installed_file()) as f:
                 data = json.load(f)
         data[mod_id] = {"filename": filename, "project_type": project_type, "thumbnail": thumbnail}
-        os.makedirs(os.path.dirname(INSTALLED_MODS_FILE), exist_ok=True)
-        with open(INSTALLED_MODS_FILE, "w") as f:
+        os.makedirs(os.path.dirname(_installed_file()), exist_ok=True)
+        with open(_installed_file(), "w") as f:
             json.dump(data, f)
 
 def get_mods_dir():
+    env = os.environ.get("STELLA_MODS_DIR")
+    if env:
+        p = Path(env)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     MODS_DIR.mkdir(parents=True, exist_ok=True)
     return MODS_DIR
 
-def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod"):
-    """Search for mods on Modrinth with version filtering"""
+def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod", offset=0, limit=20):
+    """Search for mods on Modrinth with version filtering and pagination"""
     url = "https://api.modrinth.com/v2/search"
     facets = [[f"project_type:{project_type}"]]
     if loader != "fabric":
         facets.append([f"categories:{loader}"])
     params = {
         "query": query,
-        "limit": 20,
+        "limit": limit,
+        "offset": offset,
         "facets": json.dumps(facets),
     }
     try:
@@ -42,13 +53,9 @@ def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod"
             data = resp.json()
             results = []
             for hit in data.get("hits", []):
-                # Get the best matching version for this mod
                 mod_id = hit.get("project_id", "")
                 versions = hit.get("versions", [])
-                
-                # Find version that matches the requested version
                 best_version = None
-                
                 if versions:
                     for v in versions:
                         if v == version:
@@ -56,8 +63,6 @@ def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod"
                             break
                     if not best_version and versions:
                         best_version = versions[0]
-                
-                # Only include mods that have at least the requested loader
                 loaders = hit.get("loaders", [])
                 if loader in loaders or not loaders:
                     ptype = hit.get("project_type", project_type)
@@ -71,36 +76,119 @@ def search_modrinth(query, version="1.20.1", loader="fabric", project_type="mod"
                         "project_type": ptype,
                         "source": "modrinth"
                     })
-            return results
+            return {"results": results, "total_hits": data.get("total_hits", 0)}
     except Exception as e:
-        print(f"Error searching Modrinth: {e}")
-    return []
+        logging.info(f"Error searching Modrinth: {e}")
+    return {"results": [], "total_hits": 0}
 
-def get_mod_versions(mod_id, mc_version="1.20.1"):
+def get_mod_versions(mod_id, mc_version="1.20.1", prefer_loader="fabric"):
     """Get all versions of a mod and return the one matching the MC version"""
     try:
         url = f"https://api.modrinth.com/v2/project/{mod_id}/version"
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
             versions = resp.json()
-            # Find version that supports the requested MC version
+            # First try: matching MC version + preferred loader
+            for v in versions:
+                if mc_version in v.get("game_versions", []) and prefer_loader in v.get("loaders", []):
+                    return {
+                        "version_id": v.get("id", ""),
+                        "version_name": v.get("name", ""),
+                        "files": v.get("files", []),
+                        "dependencies": v.get("dependencies", []),
+                    }
+            # Second try: matching MC version, any loader
             for v in versions:
                 if mc_version in v.get("game_versions", []):
                     return {
                         "version_id": v.get("id", ""),
                         "version_name": v.get("name", ""),
-                        "files": v.get("files", [])
+                        "files": v.get("files", []),
+                        "dependencies": v.get("dependencies", []),
                     }
-            # If no exact match, return first available version
+            # Fallback: first available version
             if versions:
                 return {
                     "version_id": versions[0].get("id", ""),
                     "version_name": versions[0].get("name", ""),
-                    "files": versions[0].get("files", [])
+                    "files": versions[0].get("files", []),
+                    "dependencies": versions[0].get("dependencies", []),
                 }
     except Exception as e:
-        print(f"Error getting mod versions: {e}")
+        logging.info(f"Error getting mod versions: {e}")
     return None
+
+
+def _is_mod_installed(mod_id):
+    if not os.path.exists(_installed_file()):
+        return False
+    with open(_installed_file()) as f:
+        data = json.load(f)
+    info = data.get(mod_id)
+    if not info:
+        return False
+    filename = info.get("filename") if isinstance(info, dict) else info
+    filepath = get_mods_dir() / filename
+    return filepath.exists()
+
+
+def download_mod_with_deps(mod_id, mc_version="1.20.1", project_type="mod", thumbnail="", _depth=0, prefer_loader="fabric"):
+    """Download a mod and all its required dependencies recursively"""
+    if _depth > 5:
+        logging.info(f"Max dependency depth reached for {mod_id}")
+        return None
+
+    if _is_mod_installed(mod_id):
+        logging.info(f"{mod_id} already installed, skipping")
+        return None
+
+    version_info = get_mod_versions(mod_id, mc_version, prefer_loader)
+    if not version_info:
+        logging.info(f"No compatible versions found for mod {mod_id}")
+        return None
+
+    # Install required dependencies first
+    for dep in version_info.get("dependencies", []):
+        if dep.get("dependency_type") == "required":
+            dep_id = dep.get("project_id")
+            if dep_id and dep_id != mod_id and not _is_mod_installed(dep_id):
+                logging.info(f"Installing dependency {dep_id} for {mod_id}...")
+                dep_thumb = ""
+                try:
+                    dr = requests.get(f"https://api.modrinth.com/v2/project/{dep_id}", timeout=10)
+                    if dr.status_code == 200:
+                        dep_thumb = dr.json().get("icon_url", "") or ""
+                except: pass
+                download_mod_with_deps(dep_id, mc_version, project_type, dep_thumb, _depth + 1, prefer_loader)
+
+    # Download the mod itself
+    files = version_info.get("files", [])
+    if not files:
+        logging.info(f"No files found for {mod_id}")
+        return None
+
+    download_url = files[0].get("url", "")
+    filename = files[0].get("filename", f"{mod_id}.jar")
+    if not download_url:
+        logging.info(f"No download URL for {mod_id}")
+        return None
+
+    mods_dir = get_mods_dir()
+    filepath = mods_dir / filename
+
+    logging.info(f"Downloading {filename}...")
+    mod_resp = requests.get(download_url, stream=True, timeout=60)
+    if mod_resp.status_code == 200:
+        with open(filepath, 'wb') as f:
+            for chunk in mod_resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        save_installed_mod_info(mod_id, filename, project_type, thumbnail)
+        logging.info(f"Downloaded {filename}")
+        return str(filepath)
+    else:
+        logging.info(f"Failed to download {mod_id}: HTTP {mod_resp.status_code}")
+        return None
 
 FORGE_VERSIONS = {
     "1.21.11": "52.0.0",
@@ -124,8 +212,8 @@ FORGE_VERSIONS = {
     "1.16.5": "36.2.0"
 }
 
-def get_trending_mods(version="1.20.4", loader="fabric", limit=15, project_type="mod"):
-    """Get trending mods from Modrinth"""
+def get_trending_mods(version="1.20.4", loader="fabric", limit=15, project_type="mod", offset=0):
+    """Get trending mods from Modrinth with pagination"""
     url = "https://api.modrinth.com/v2/search"
     facets = [[f"project_type:{project_type}"]]
     if loader != "fabric":
@@ -133,6 +221,7 @@ def get_trending_mods(version="1.20.4", loader="fabric", limit=15, project_type=
     params = {
         "query": "",
         "limit": limit,
+        "offset": offset,
         "index": "downloads",
         "facets": json.dumps(facets),
     }
@@ -140,19 +229,22 @@ def get_trending_mods(version="1.20.4", loader="fabric", limit=15, project_type=
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            return [{
-                "name": hit.get("title", ""),
-                "description": hit.get("description", ""),
-                "mod_id": hit.get("project_id", ""),
-                "version": hit.get("versions", ["Unknown"])[0] if hit.get("versions") else "Unknown",
-                "downloads": hit.get("downloads", 0),
-                "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
-                "project_type": hit.get("project_type", project_type),
-                "source": "modrinth"
-            } for hit in data.get("hits", [])]
+            return {
+                "results": [{
+                    "name": hit.get("title", ""),
+                    "description": hit.get("description", ""),
+                    "mod_id": hit.get("project_id", ""),
+                    "version": hit.get("versions", ["Unknown"])[0] if hit.get("versions") else "Unknown",
+                    "downloads": hit.get("downloads", 0),
+                    "thumbnail": hit.get("icon_url") or hit.get("thumbnail_url", ""),
+                    "project_type": hit.get("project_type", project_type),
+                    "source": "modrinth"
+                } for hit in data.get("hits", [])],
+                "total_hits": data.get("total_hits", 0)
+            }
     except Exception as e:
-        print(f"Error getting trending mods: {e}")
-    return []
+        logging.info(f"Error getting trending mods: {e}")
+    return {"results": [], "total_hits": 0}
 
 def search_forge(mc_version="1.20.1"):
     """Get Forge installer for a specific Minecraft version"""
@@ -184,68 +276,29 @@ def download_forge(mc_version):
         filename = f"forge-{mc_version}-installer.jar"
         filepath = forge_dir / filename
         
-        print(f"Downloading Forge installer...")
+        logging.info(f"Downloading Forge installer...")
         resp = requests.get(url, stream=True, timeout=60)
         if resp.status_code == 200:
             with open(filepath, 'wb') as f:
                 for chunk in resp.iter_content(chunk_size=8192):
                     f.write(chunk)
-            print(f"Downloaded Forge to {filepath}")
+            logging.info(f"Downloaded Forge to {filepath}")
             return str(filepath)
     except Exception as e:
-        print(f"Error downloading Forge: {e}")
+        logging.info(f"Error downloading Forge: {e}")
     return None
 
-def download_mod(mod_id, mc_version="1.20.1", source="modrinth", project_type="mod", thumbnail=""):
-    """Download a mod from Modrinth, selecting the version that matches the MC version"""
+def download_mod(mod_id, mc_version="1.20.1", source="modrinth", project_type="mod", thumbnail="", prefer_loader="fabric"):
+    """Download a mod with automatic dependency resolution"""
     if source == "modrinth":
-        try:
-            # Get available versions for this mod
-            version_info = get_mod_versions(mod_id, mc_version)
-            if not version_info:
-                print(f"No compatible versions found for mod {mod_id}")
-                return None
-            
-            version_id = version_info.get("version_id", "")
-            files = version_info.get("files", [])
-            
-            if not files:
-                print(f"No files found for version {version_id}")
-                return None
-            
-            # Get the first JAR file
-            download_url = files[0].get("url", "")
-            filename = files[0].get("filename", f"{mod_id}.jar")
-            
-            if not download_url:
-                print(f"No download URL found")
-                return None
-            
-            mods_dir = get_mods_dir()
-            filepath = mods_dir / filename
-            
-            print(f"Downloading {filename}...")
-            mod_resp = requests.get(download_url, stream=True, timeout=60)
-            if mod_resp.status_code == 200:
-                with open(filepath, 'wb') as f:
-                    for chunk in mod_resp.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                
-                save_installed_mod_info(mod_id, filename, project_type, thumbnail)
-                print(f"\nSuccessfully downloaded to {filepath}")
-                return str(filepath)
-            else:
-                print(f"Failed to download: HTTP {mod_resp.status_code}")
-        except Exception as e:
-            print(f"Error downloading mod: {e}")
+        return download_mod_with_deps(mod_id, mc_version, project_type, thumbnail, 0, prefer_loader)
     return None
 
 def get_installed_mods(project_type=None):
     """Get list of installed mods, optionally filtered by project_type"""
     installed_map = {}
-    if os.path.exists(INSTALLED_MODS_FILE):
-        with open(INSTALLED_MODS_FILE) as f:
+    if os.path.exists(_installed_file()):
+        with open(_installed_file()) as f:
             installed_map = json.load(f)
     mods_dir = get_mods_dir()
     def _get_info(entry):
@@ -277,6 +330,6 @@ def delete_mod(filename):
     filepath = mods_dir / filename
     if filepath.exists():
         filepath.unlink()
-        print(f"Deleted {filename}")
+        logging.info(f"Deleted {filename}")
         return True
     return False
