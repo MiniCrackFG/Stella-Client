@@ -30,6 +30,8 @@ def start_ui():
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
 
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+
     window = webview.create_window(
         title="Stella Client",
         url=html_path,
@@ -43,6 +45,7 @@ def start_ui():
         frameless=True,
         easy_drag=False,
         background_color="#0a0a0a",
+        icon=icon_path,
     )
 
     api._window = window
