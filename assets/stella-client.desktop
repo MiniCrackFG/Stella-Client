@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Stella Client
+Comment=Minecraft Launcher
+Exec=python3 /home/ivan/Proyectos/stella-client/main.py
+Icon=/home/ivan/Proyectos/stella-client/assets/icon-256.png
+Terminal=false
+Type=Application
+Categories=Game;Utility;

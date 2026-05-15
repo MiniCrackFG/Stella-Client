@@ -1,10 +1,8 @@
-# Python
-venv/
-__pycache__/
+build/
+dist/
+.env
+logs
 *.pyc
-
-# VSCode
+__pycache__/
+venv/
 .vscode/
-
-# Linux
-*.log
