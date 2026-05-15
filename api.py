@@ -11,6 +11,14 @@ import launcher.mods as mods
 import launcher.discord_rpc as discord_rpc
 
 
+def _open_url(url):
+    try:
+        subprocess.Popen(['xdg-open', url])
+    except Exception:
+        import webbrowser
+        webbrowser.open(url)
+
+
 def _ensure_glib():
     try:
         import gi
@@ -103,8 +111,7 @@ class API:
     def start_microsoft_login(self):
         try:
             di = minecraft.get_device_code_info()
-            import webbrowser
-            webbrowser.open(di.get("verification_uri", ""))
+            _open_url(di.get("verification_uri", ""))
             return di
         except Exception as e:
             return {"error": str(e)}
@@ -250,8 +257,7 @@ class API:
         return ""
 
     def open_url(self, url):
-        import webbrowser
-        webbrowser.open(url)
+        _open_url(url)
         return {"ok": True}
 
     def get_server_info(self, address):

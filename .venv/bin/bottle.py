@@ -1,4 +1,4 @@
-#!/home/funkha/stella-client/.venv/bin/python3
+#!/home/ivan/Proyectos/stella-client/.venv/bin/python3
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 """
