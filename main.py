@@ -95,6 +95,8 @@ def start_ui():
 
     _set_default_icon()
 
+    is_win = sys.platform == "win32"
+
     window = webview.create_window(
         title="Stella Client",
         url=html_path,
@@ -104,8 +106,8 @@ def start_ui():
         min_size=(800, 450),
         resizable=True,
         fullscreen=False,
-        maximized=True,
-        frameless=True,
+        maximized=not is_win,
+        frameless=not is_win,
         easy_drag=False,
         background_color="#0a0a0a",
     )

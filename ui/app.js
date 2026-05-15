@@ -315,7 +315,14 @@ function showSplash() {
   if (s) requestAnimationFrame(() => s.classList.add('show'));
 }
 
-function initApp() {
+async function initApp() {
+  try {
+    const p = await pywebview.api.get_platform();
+    if (p.platform === 'win') {
+      document.body.classList.add('platform-win');
+      document.getElementById('titlebar')?.remove();
+    }
+  } catch(e) { /* ignore */ }
   createStars();
   scheduleShootingStar();
   initInputEffects();

@@ -54,6 +54,9 @@ def _cached(key, ttl, func, *args, **kwargs):
 class API:
     _window = None
 
+    def get_platform(self):
+        return {"platform": "win" if sys.platform == "win32" else "linux"}
+
     def get_settings(self):
         s = minecraft.load_settings()
         inst = self.get_current_instance()
