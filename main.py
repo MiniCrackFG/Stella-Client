@@ -60,6 +60,8 @@ def start_ui():
 
     api._window = window
 
+    window.events.closing += discord_rpc.close_rpc
+
     webview.start(debug=False, func=lambda: set_window_icon(window))
 
 
