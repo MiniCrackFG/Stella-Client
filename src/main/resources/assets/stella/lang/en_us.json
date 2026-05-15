@@ -1,5 +1,7 @@
 {
     "stella.client.connected": "Connected to Stella",
     "stella.client.disconnected": "Disconnected from Stella",
-    "stella.client.connecting": "Connecting..."
+    "stella.client.connecting": "Connecting...",
+    "key.stella.open_menu": "Open Stella Menu",
+    "category.stella": "Stella Client"
 }
