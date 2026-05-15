@@ -2,6 +2,7 @@ package com.stella.client;
 
 import com.stella.client.network.StellaConnection;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +23,12 @@ public class StellaClient {
 
         LOGGER.info("Initializing Stella Client instance");
 
-        connection = new StellaConnection("wss://api.stella-client.com/ws");
+        connection = new StellaConnection("ws://localhost:17523");
+
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            LOGGER.info("Joined world, connecting to Stella server...");
+            connection.connect();
+        });
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             LOGGER.info("Shutting down Stella Client");

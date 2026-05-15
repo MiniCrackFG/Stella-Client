@@ -16,32 +16,22 @@ import net.minecraft.world.item.ItemStack;
 
 public class StellaMenuHandler {
     public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("stella-client", "category"));
-    private static final int RIGHT_SHIFT_KEY = 344;
 
     private static KeyMapping menuKeyBinding;
-    private static boolean wasRightShiftDown = false;
 
     public static void register() {
         menuKeyBinding = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.stella.open_menu",
                 InputConstants.Type.KEYSYM,
-                RIGHT_SHIFT_KEY,
+                InputConstants.KEY_RSHIFT,
                 CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
-
             if (menuKeyBinding.consumeClick()) {
                 openMenu(client);
-                return;
             }
-
-            boolean isDown = InputConstants.isKeyDown(client.getWindow(), RIGHT_SHIFT_KEY);
-            if (isDown && !wasRightShiftDown) {
-                openMenu(client);
-            }
-            wasRightShiftDown = isDown;
         });
 
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
