@@ -15,11 +15,14 @@ _gi_available = False
 
 
 def _open_url(url):
-    try:
-        subprocess.Popen(['xdg-open', url])
-    except Exception:
-        import webbrowser
-        webbrowser.open(url)
+    if sys.platform != "win32":
+        try:
+            subprocess.Popen(['xdg-open', url])
+            return
+        except Exception:
+            pass
+    import webbrowser
+    webbrowser.open(url)
 
 
 def _ensure_glib():
