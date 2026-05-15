@@ -19,6 +19,19 @@ def ensure_dirs():
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
 
+def set_window_icon(window):
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon-256.png")
+    try:
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf
+        if hasattr(window, 'native') and window.native:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(icon_path)
+            window.native.set_icon(pixbuf)
+    except Exception:
+        pass
+
+
 def start_ui():
     ensure_dirs()
     instances.ensure_default_instance()
@@ -29,8 +42,6 @@ def start_ui():
         threading.Thread(target=lambda: [discord_rpc.init_rpc(), discord_rpc.update_menu()], daemon=True).start()
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
-
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
 
     window = webview.create_window(
         title="Stella Client",
@@ -45,12 +56,11 @@ def start_ui():
         frameless=True,
         easy_drag=False,
         background_color="#0a0a0a",
-        icon=icon_path,
     )
 
     api._window = window
 
-    webview.start(debug=False)
+    webview.start(debug=False, func=lambda: set_window_icon(window))
 
 
 if __name__ == "__main__":
