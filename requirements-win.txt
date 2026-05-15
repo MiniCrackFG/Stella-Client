@@ -1,0 +1,6 @@
+pywebview>=6.2
+minecraft-launcher-lib>=8.0
+Pillow>=12.0
+requests>=2.31
+pypresence>=4.6
+psutil>=5.9

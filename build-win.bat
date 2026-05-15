@@ -26,7 +26,7 @@ REM 3. Activate and install dependencies
 echo Installing dependencies...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install pywebview minecraft-launcher-lib Pillow requests pypresence psutil pyinstaller
+pip install -r requirements-win.txt pyinstaller
 
 REM 4. Build with PyInstaller
 echo.
