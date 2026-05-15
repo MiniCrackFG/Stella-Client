@@ -1,3 +1,279 @@
+function createStars() {
+  const container = document.getElementById('stars');
+  if (!container) return;
+  for (let i = 0; i < 300; i++) {
+    const s = document.createElement('span');
+    s.style.left = Math.random() * 100 + '%';
+    s.style.top = Math.random() * 100 + '%';
+    s.style.setProperty('--d', (2 + Math.random() * 3) + 's');
+    s.style.setProperty('--a', (0.5 + Math.random() * 0.5));
+    s.style.setProperty('--drift', (3 + Math.random() * 3) + 's');
+    s.style.setProperty('--dx', ((Math.random() - 0.5) * 40) + 'px');
+    s.style.setProperty('--dy', ((Math.random() - 0.5) * 40) + 'px');
+    const size = 2 + Math.random() * 3;
+    s.style.width = size + 'px';
+    s.style.height = size + 'px';
+    container.appendChild(s);
+  }
+  const moon = document.createElement('div');
+  moon.className = 'moon';
+  moon.id = 'draggable-moon';
+
+  function updateMoonTheme() {
+    const isLight = document.body.classList.contains('theme-light');
+    const isOled = document.body.classList.contains('theme-oled');
+    if (isOled) {
+      moon.style.background = 'radial-gradient(circle at 35% 35%, #e8e8f0, #c0c0d0 40%, #8888a0 80%, #444460)';
+      moon.style.boxShadow = '0 0 40px rgba(150, 150, 200, 0.3), 0 0 80px rgba(100, 100, 160, 0.15)';
+      moon._glow = '0 0 40px rgba(150, 150, 200, 0.3), 0 0 80px rgba(100, 100, 160, 0.15)';
+      moon._glowHover = '0 0 50px rgba(150, 150, 200, 0.4), 0 0 100px rgba(100, 100, 160, 0.2)';
+    } else if (isLight) {
+      moon.style.background = 'radial-gradient(circle at 35% 35%, #ffffff, #e8e0f8 40%, #c8b8e8 80%, #a890d0)';
+      moon.style.boxShadow = '0 0 50px rgba(180, 150, 220, 0.5), 0 0 100px rgba(160, 130, 200, 0.25)';
+      moon._glow = '0 0 50px rgba(180, 150, 220, 0.5), 0 0 100px rgba(160, 130, 200, 0.25)';
+      moon._glowHover = '0 0 60px rgba(180, 150, 220, 0.7), 0 0 120px rgba(160, 130, 200, 0.35)';
+    } else {
+      moon.style.background = 'radial-gradient(circle at 35% 35%, #f5f3ff, #c4b5fd 40%, #7c3aed 80%, #4c1d95)';
+      moon.style.boxShadow = '0 0 50px rgba(168,85,247,0.5), 0 0 100px rgba(124,58,237,0.25)';
+      moon._glow = '0 0 50px rgba(168,85,247,0.5), 0 0 100px rgba(124,58,237,0.25)';
+      moon._glowHover = '0 0 60px rgba(168,85,247,0.7), 0 0 120px rgba(124,58,237,0.35)';
+    }
+  }
+
+  moon.style.cssText = 'position:fixed;left:80px;top:60px;z-index:9998;cursor:grab;user-select:none;pointer-events:auto;opacity:0.8;width:70px;height:70px;border-radius:50%;transition:box-shadow 0.3s, background 0.3s;border:2px solid rgba(0,0,0,0.3);';
+  updateMoonTheme();
+
+  moon.addEventListener('mouseenter', () => {
+    if (!moon._isDragging) moon.style.boxShadow = moon._glowHover;
+  });
+  moon.addEventListener('mouseleave', () => {
+    if (!moon._isDragging) moon.style.boxShadow = moon._glow;
+  });
+
+  const crater1 = document.createElement('div');
+  crater1.style.cssText = 'position:absolute;width:55px;height:55px;border-radius:50%;top:7px;left:10px;background:radial-gradient(circle at 30% 30%, rgba(245,243,255,0.4), transparent 70%);';
+  moon.appendChild(crater1);
+  const crater2 = document.createElement('div');
+  crater2.style.cssText = 'position:absolute;width:16px;height:16px;border-radius:50%;top:18px;left:32px;background:radial-gradient(circle at 30% 30%, rgba(196,181,253,0.3), transparent);';
+  moon.appendChild(crater2);
+
+  let animStartTime = null;
+  let animPausedTime = 0;
+  const animDuration = 30000;
+  const travelDist = () => window.innerWidth * 0.8 + 160;
+
+  function updateMoon(timestamp) {
+    if (!moon._isDragging) {
+      if (!animStartTime) animStartTime = timestamp - animPausedTime;
+      const elapsed = timestamp - animStartTime;
+      const progress = (elapsed % animDuration) / animDuration;
+      const tx = -80 + travelDist() * progress;
+      const opacity = progress < 0.05 ? progress / 0.05 * 0.8
+        : progress > 0.95 ? (1 - (progress - 0.95) / 0.05) * 0.8
+        : progress > 0.45 && progress < 0.55 ? 0.2 + (0.6 - Math.abs(progress - 0.5) * 2) * 0.6 * 0.8
+        : 0.8;
+      moon.style.transform = `translateX(${tx}px)`;
+      moon.style.opacity = opacity;
+    }
+    requestAnimationFrame(updateMoon);
+  }
+
+  moon._isDragging = false;
+  moon.addEventListener('mousedown', (e) => {
+    moon._isDragging = true;
+    const rect = moon.getBoundingClientRect();
+    const ox = rect.width / 2, oy = rect.height / 2;
+    moon.style.left = (e.clientX - ox) + 'px';
+    moon.style.top = (e.clientY - oy) + 'px';
+    moon.style.cursor = 'grabbing';
+    document.body.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!moon._isDragging) return;
+    moon.style.left = (e.clientX - moon.offsetWidth / 2) + 'px';
+    moon.style.top = (e.clientY - moon.offsetHeight / 2) + 'px';
+    moon.style.cursor = 'grabbing';
+    document.body.style.cursor = 'grabbing';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!moon._isDragging) return;
+    moon._isDragging = false;
+    moon.style.cursor = 'grab';
+    document.body.style.cursor = '';
+  });
+
+  new MutationObserver(() => {
+    updateMoonTheme();
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+  document.body.appendChild(moon);
+  requestAnimationFrame(updateMoon);
+}
+
+function createShootingStar() {
+  const isLight = document.body.classList.contains('theme-light');
+  const starColor = isLight ? '#fff' : '#a78bfa';
+  const glowColor = isLight ? 'rgba(200,200,255,0.6)' : 'rgba(168,85,247,0.8)';
+  const trailColors = isLight ? ['#a855f7', '#c084fc', '#9333ea', '#7c3aed'] : ['#fff', '#a78bfa', '#c084fc', '#e9d5ff'];
+  const explColors = isLight ? ['#7c3aed', '#a855f7', '#c084fc', '#9333ea', '#6d28d9'] : ['#fff', '#a78bfa', '#c084fc', '#e9d5ff', '#f5f3ff'];
+  const starGlow = isLight ? '0 0 12px rgba(200,200,255,0.6)' : '0 0 12px rgba(168,85,247,0.8)';
+
+  const startX = 2 + Math.random() * 8;
+  const startY = 2 + Math.random() * 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const startPxX = vw * startX / 100;
+  const startPxY = vh * startY / 100;
+  const endX = vw * (0.92 + Math.random() * 0.07);
+  const endY = vh * (0.9 + Math.random() * 0.08);
+  const dx = endX - startPxX;
+  const dy = endY - startPxY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const duration = 1.8 + Math.random() * 0.6;
+
+  const container = document.createElement('div');
+  container.style.cssText = `position:fixed;left:${startPxX}px;top:${startPxY}px;pointer-events:none;z-index:2;`;
+  document.body.appendChild(container);
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  // Black outline
+  const outlineSvg = document.createElementNS(svgNS, 'svg');
+  outlineSvg.setAttribute('width', '32');
+  outlineSvg.setAttribute('height', '32');
+  outlineSvg.setAttribute('viewBox', '0 0 24 24');
+  outlineSvg.style.cssText = 'position:absolute;top:0;left:0;display:block;pointer-events:none;';
+  const outlinePath = document.createElementNS(svgNS, 'path');
+  outlinePath.setAttribute('d', 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z');
+  outlinePath.setAttribute('fill', 'rgba(0,0,0,0.5)');
+  outlinePath.setAttribute('stroke', 'none');
+  outlineSvg.appendChild(outlinePath);
+
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('width', '32');
+  svg.setAttribute('height', '32');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.style.cssText = `display:block;filter:drop-shadow(0 0 12px ${glowColor});position:absolute;top:0;left:0;`;
+  const path = document.createElementNS(svgNS, 'path');
+  path.setAttribute('d', 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', starColor);
+  path.setAttribute('stroke-width', '1.5');
+  svg.appendChild(path);
+
+  svg.style.animation = `starSpin ${duration * 0.4}s linear infinite`;
+  outlineSvg.style.animation = `starSpin ${duration * 0.4}s linear infinite`;
+  container.appendChild(outlineSvg);
+  container.appendChild(svg);
+
+  // Trail particles
+  const particleCount = 50 + Math.floor(Math.random() * 20);
+  const particles = [];
+  for (let i = 0; i < particleCount; i++) {
+    const p = document.createElement('div');
+    const size = 2 + Math.random() * 3;
+    const spreadX = (Math.random() - 0.5) * 35;
+    const spreadY = (Math.random() - 0.5) * 20 - 5;
+    const colors = trailColors;
+    p.style.cssText = `
+      position:absolute;width:${size}px;height:${size}px;
+      background:${colors[Math.floor(Math.random() * colors.length)]};
+      border-radius:50%;
+      pointer-events:none;opacity:0;
+      box-shadow: 0 0 4px ${isLight ? 'rgba(150,100,255,0.3)' : 'rgba(168,85,247,0.5)'};
+      top:16px;left:16px;
+    `;
+    container.appendChild(p);
+    particles.push({ el: p, ox: spreadX, oy: spreadY, delay: Math.random() * 0.15 });
+  }
+
+  let startTime = null;
+  let exploded = false;
+  let explosionParticles = [];
+
+  function animate(ts) {
+    if (!startTime) startTime = ts;
+    const elapsed = (ts - startTime) / 1000;
+    const progress = Math.min(elapsed / duration, 1);
+
+    const x = dx * progress;
+    const y = dy * progress;
+    container.style.transform = `translate(${x}px, ${y}px)`;
+
+    // Trail
+    particles.forEach(p => {
+      const pElapsed = Math.max(0, progress - p.delay);
+      if (pElapsed <= 0) { p.el.style.opacity = '0'; return; }
+      const pProgress = pElapsed / 0.25;
+      const fade = 1 - pProgress;
+      if (fade <= 0) { p.el.style.opacity = '0'; return; }
+      p.el.style.opacity = (fade * 0.9).toFixed(2);
+      p.el.style.transform = `translate(${p.ox * pProgress}px, ${p.oy * pProgress}px)`;
+    });
+
+    // Explosion at end
+    if (progress >= 0.7 && !exploded) {
+      exploded = true;
+      svg.style.transition = 'transform 0.6s, opacity 0.8s';
+      svg.style.transform = 'scale(3)';
+      svg.style.opacity = '0';
+      outlineSvg.style.transition = 'transform 0.6s, opacity 0.8s';
+      outlineSvg.style.transform = 'scale(3)';
+      outlineSvg.style.opacity = '0';
+      for (let i = 0; i < 35; i++) {
+        const ep = document.createElement('div');
+        const size = 3 + Math.random() * 5;
+        const a = Math.random() * 2 * Math.PI;
+        const speed = 60 + Math.random() * 100;
+        const colors2 = explColors;
+        ep.style.cssText = `
+          position:absolute;width:${size}px;height:${size}px;
+          background:${colors2[Math.floor(Math.random() * colors2.length)]};
+          border-radius:50%;pointer-events:none;opacity:1;
+          box-shadow: 0 0 6px ${isLight ? 'rgba(150,100,255,0.4)' : 'rgba(168,85,247,0.6)'};
+          top:16px;left:16px;
+        `;
+        container.appendChild(ep);
+        explosionParticles.push({ el: ep, angle: a, speed: speed });
+      }
+    }
+
+    explosionParticles.forEach(ep => {
+      const epElapsed = (progress - 0.7) / 0.3;
+      if (epElapsed <= 0) return;
+      const fade = 1 - epElapsed;
+      ep.el.style.opacity = fade > 0 ? fade.toFixed(2) : '0';
+      ep.el.style.transform = `translate(${Math.cos(ep.angle) * ep.speed * epElapsed}px, ${Math.sin(ep.angle) * ep.speed * epElapsed}px)`;
+    });
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      container.remove();
+    }
+  }
+  requestAnimationFrame(animate);
+}
+
+function scheduleShootingStar() {
+  function spawn() {
+    const roll = Math.random() * 100;
+    let count = 1;
+    if (roll < 25) count = 3;
+    else if (roll < 55) count = 2;
+    for (let i = 0; i < count; i++) {
+      setTimeout(() => createShootingStar(), i * 200);
+    }
+  }
+  function reschedule() {
+    const delay = 5000 + Math.random() * 15000;
+    setTimeout(() => { spawn(); reschedule(); }, delay);
+  }
+  setTimeout(() => { spawn(); reschedule(); }, 3000);
+}
+
 let currentPage = 'home';
 let msLoginInterval = null;
 
@@ -40,6 +316,9 @@ function showSplash() {
 }
 
 function initApp() {
+  createStars();
+  scheduleShootingStar();
+  initInputEffects();
   showSplash();
   try { initDrag(); } catch(e) { console.error('initDrag:', e); }
   initSidebar();
@@ -62,7 +341,52 @@ if (window.pywebview) {
 
 /* Navigation */
 function initSidebar() {
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = 'position:fixed;font-size:15px;padding:8px 18px;border-radius:8px;white-space:nowrap;font-weight:700;pointer-events:none;z-index:99999;opacity:0;transition:opacity 0.2s ease;border:1px solid rgba(168,85,247,0.25);box-shadow:0 4px 12px rgba(0,0,0,0.5);font-family:\'Comic Neue\',sans-serif;';
+  tooltip.style.backdropFilter = 'blur(4px)';
+  tooltip.style.webkitBackdropFilter = 'blur(4px)';
+
+  function updateTooltipBg() {
+    if (document.body.classList.contains('theme-light')) {
+      tooltip.style.background = 'rgba(245, 245, 250, 0.92)';
+    } else if (document.body.classList.contains('theme-oled')) {
+      tooltip.style.background = 'rgba(0, 0, 0, 0.95)';
+    } else {
+      tooltip.style.background = 'rgba(10, 7, 32, 0.9)';
+    }
+  }
+  updateTooltipBg();
+  new MutationObserver(updateTooltipBg).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  tooltip.style.backdropFilter = 'blur(4px)';
+  tooltip.style.webkitBackdropFilter = 'blur(4px)';
+  document.body.appendChild(tooltip);
+
+  function setTooltip(text) {
+    tooltip.innerHTML = '';
+    const inner = document.createElement('span');
+    inner.style.background = 'linear-gradient(90deg, #a855f7, #3b82f6, #ec4899, #06b6d4, #a855f7, #3b82f6, #ec4899, #06b6d4)';
+    inner.style.backgroundSize = '300% 100%';
+    inner.style.webkitBackgroundClip = 'text';
+    inner.style.webkitTextFillColor = 'transparent';
+    inner.style.animation = 'slideRight 12s linear infinite';
+    inner.style.fontFamily = "'Comic Neue', sans-serif";
+    inner.style.fontSize = '15px';
+    inner.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    tooltip.appendChild(inner);
+  }
+
   document.querySelectorAll('.nav-btn[data-page]').forEach(btn => {
+    btn.addEventListener('mouseenter', (e) => {
+      const rect = btn.getBoundingClientRect();
+      setTooltip(btn.title || btn.dataset.page);
+      tooltip.style.left = (rect.right + 10) + 'px';
+      tooltip.style.top = (rect.top + rect.height / 2 - 12) + 'px';
+      tooltip.style.opacity = '1';
+    });
+    btn.addEventListener('mouseleave', () => {
+      tooltip.style.opacity = '0';
+    });
+    btn.removeAttribute('title');
     btn.addEventListener('click', () => navigate(btn.dataset.page));
   });
 }
@@ -106,9 +430,10 @@ async function refreshHome() {
     const inst = await pywebview.api.get_current_instance();
     const badge = document.getElementById('instance-badge');
     if (inst) {
-      badge.textContent = `${inst.icon || '📦'} ${inst.name} · ${inst.version}`;
+      const iconHtml = inst.icon && inst.icon !== '📦' ? inst.icon : '<svg class="ver-star-badge" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
+      badge.innerHTML = `<span class="badge-grad">${iconHtml} ${inst.name} · ${inst.version}</span>`;
     } else {
-      badge.textContent = '📦 Default';
+      badge.innerHTML = '<span class="badge-grad"><svg class="ver-star-badge" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> Default</span>';
     }
   } catch (e) { console.error(e); }
 }
@@ -154,7 +479,7 @@ async function refreshInstances() {
   }
   list.innerHTML = instances.map(inst => `
     <div class="instance-card ${inst.id === currentId ? 'active' : ''}" onclick="selectInstance('${inst.id}')">
-      <div class="icon">${inst.icon || '📦'}</div>
+      <div class="icon">${inst.icon && inst.icon !== '📦' ? inst.icon : '<svg class="ver-star" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'}</div>
       <div class="iname">${inst.name}</div>
       <div class="imeta">${inst.version} · ${inst.ram || 4}GB</div>
       ${inst.id === currentId ? '<div style="font-size:11px;color:var(--accent);font-weight:600">✓ Active</div>' : ''}
@@ -218,7 +543,7 @@ async function refreshVersions() {
   list.innerHTML = _versionGroups.map(g => `
     <div class="version-card ${g.versions.includes(current) ? 'active' : ''}" onclick="openVersionSubs('${g.major}')">
       <div class="version-card-header">
-        <div class="icon-placeholder">📦</div>
+        <div class="icon-placeholder"><svg class="ver-star" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
         <div class="major">${g.major}.x</div>
       </div>
     </div>
@@ -396,6 +721,91 @@ let currentCategory = 'mod';
 let browseOffset = 0;
 let browseQuery = '';
 const PAGE_SIZE = 15;
+
+function createFallingChar(input, char) {
+  const rect = input.getBoundingClientRect();
+  const colors = ['#a855f7', '#3b82f6', '#ec4899', '#06b6d4', '#c084fc'];
+  for (let i = 0; i < 6; i++) {
+    const el = document.createElement('span');
+    el.textContent = char;
+    el.style.cssText = `
+      position:fixed;pointer-events:none;z-index:9999;
+      font-size:${12 + Math.random() * 6}px;
+      font-weight:700;font-family:'Comic Neue',sans-serif;
+      color:${colors[Math.floor(Math.random() * colors.length)]};
+      left:${rect.left + Math.random() * rect.width}px;
+      top:${rect.top + rect.height / 2}px;
+      opacity:1;
+      transform:translateY(0);
+      transition:all ${0.5 + Math.random() * 0.3}s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    `;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transform = `translateY(${30 + Math.random() * 60}px) translateX(${(Math.random() - 0.5) * 20}px)`;
+      el.style.opacity = '0';
+    });
+    setTimeout(() => el.remove(), 1000);
+  }
+}
+
+function createTypingChar(input, char) {
+  input.style.transition = 'box-shadow 0.3s ease';
+  input.style.boxShadow = '0 0 20px rgba(168,85,247,0.6), 0 0 50px rgba(59,130,246,0.3), inset 0 0 15px rgba(168,85,247,0.1)';
+  setTimeout(() => {
+    input.style.boxShadow = 'none';
+  }, 500);
+}
+
+function createFallingChar(input, char) {
+  const colors = ['#a855f7', '#3b82f6', '#ec4899', '#06b6d4', '#c084fc'];
+  input.style.transition = 'box-shadow 0.3s ease';
+  input.style.boxShadow = '0 0 25px rgba(236,72,153,0.6), 0 0 60px rgba(6,182,212,0.3), inset 0 0 15px rgba(236,72,153,0.1)';
+  setTimeout(() => {
+    input.style.boxShadow = 'none';
+  }, 600);
+  for (let i = 0; i < 6; i++) {
+    const el = document.createElement('span');
+    el.textContent = char;
+    const rect = input.getBoundingClientRect();
+    el.style.cssText = `
+      position:fixed;pointer-events:none;z-index:9999;
+      font-size:${12 + Math.random() * 6}px;
+      font-weight:700;font-family:'Comic Neue',sans-serif;
+      color:${colors[Math.floor(Math.random() * colors.length)]};
+      text-shadow:0 0 6px ${colors[Math.floor(Math.random() * colors.length)]};
+      left:${rect.left + Math.random() * rect.width}px;
+      top:${rect.top + rect.height / 2}px;
+      opacity:1;
+      transform:translateY(0);
+      transition:all ${0.5 + Math.random() * 0.3}s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    `;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.transform = `translateY(${30 + Math.random() * 60}px) translateX(${(Math.random() - 0.5) * 20}px)`;
+      el.style.opacity = '0';
+    });
+    setTimeout(() => el.remove(), 1000);
+  }
+}
+
+function initInputEffects() {
+  const inputs = document.querySelectorAll('input[type="text"], input[type="search"]');
+  inputs.forEach(inp => {
+    let prev = '';
+    inp.addEventListener('focus', () => { prev = inp.value; });
+    inp.addEventListener('input', () => {
+      const val = inp.value;
+      if (val.length > prev.length) {
+        const typed = val.slice(prev.length);
+        for (const ch of typed) createTypingChar(inp, ch);
+      } else if (val.length < prev.length) {
+        const deleted = prev.slice(val.length);
+        for (const ch of deleted) createFallingChar(inp, ch);
+      }
+      prev = val;
+    });
+  });
+}
 
 function initModsPage() {
   document.querySelectorAll('.cat-btn').forEach(btn => {

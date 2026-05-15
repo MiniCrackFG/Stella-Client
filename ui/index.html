@@ -14,13 +14,14 @@
     <svg class="splash-star" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4a8fbf" stroke-width="1.5">
       <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
     </svg>
-    <h1 class="splash-title">Stella Client</h1>
+    <h1 class="splash-title"><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></h1>
     <p class="splash-sub">Minecraft Launcher</p>
     <div class="splash-loader"><span></span><span></span><span></span></div>
   </div>
+  <div id="stars"></div>
   <div id="app">
     <div id="titlebar">
-      <span id="drag-region" class="pywebview-drag-region">Stella Client</span>
+      <span id="drag-region" class="pywebview-drag-region"><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></span>
       <div class="win-btns">
         <button class="win-btn" onclick="minimizeWin()">─</button>
         <button class="win-btn" onclick="maximizeWin()">□</button>
@@ -62,9 +63,10 @@
     </aside>
 
     <main id="content">
+      
       <div id="page-home" class="page active">
         <div class="hero">
-          <h1>Stella Client</h1>
+          <h1><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></h1>
           <p class="hero-subtitle">Minecraft Launcher</p>
         </div>
         <div class="play-card">
@@ -72,7 +74,7 @@
             <span id="user-badge" class="user-badge">👤 Cargando...</span>
             <div class="version-select">
               <label>Version</label>
-              <span id="version-current" style="font-weight:700;font-size:15px">1.21.11</span>
+              <span id="version-current">1.21.11</span>
             </div>
             <span id="instance-badge" class="user-badge" style="font-size:12px;color:var(--accent)">📦 Default</span>
           </div>
@@ -228,7 +230,7 @@
       <div class="setting-group">
         <label>Icon</label>
         <select id="new-instance-icon">
-          <option value="📦">📦</option>
+          <option value="">⭐</option>
           <option value="⚔️">⚔️</option>
           <option value="🧱">🧱</option>
           <option value="🌟">🌟</option>
