@@ -357,8 +357,58 @@ def build_stella_mod():
     return None
 
 
+FABRIC_API_MODRINTH_ID = "P7dR8mSH"
+
+def _install_fabric_api(mc_version):
+    """Download Fabric API from Modrinth if not already installed"""
+    mods_dir = get_mods_dir()
+    for f in mods_dir.glob("fabric-api*.jar"):
+        logging.info(f"Fabric API already installed: {f.name}")
+        return True
+
+    logging.info("Downloading Fabric API...")
+    version_info = get_mod_versions(FABRIC_API_MODRINTH_ID, mc_version, "fabric")
+    if not version_info:
+        logging.warning("Could not find Fabric API version, installing Stella mod anyway")
+        return False
+
+    files = version_info.get("files", [])
+    if not files:
+        return False
+
+    download_url = files[0].get("url", "")
+    filename = files[0].get("filename", "fabric-api.jar")
+    if not download_url:
+        return False
+
+    filepath = mods_dir / filename
+    try:
+        resp = requests.get(download_url, stream=True, timeout=60)
+        if resp.status_code == 200:
+            with open(filepath, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            logging.info(f"Downloaded Fabric API: {filename}")
+            return True
+    except Exception as e:
+        logging.error(f"Failed to download Fabric API: {e}")
+    return False
+
+
 def install_stella_mod():
     """Build and install the Stella Client mod into the current mods directory"""
+    try:
+        settings_path = os.path.expanduser("~/.stellaclient/config.json")
+        if os.path.exists(settings_path):
+            with open(settings_path) as f:
+                mc_version = json.load(f).get("version", "1.21.11")
+        else:
+            mc_version = "1.21.11"
+        _install_fabric_api(mc_version)
+    except Exception:
+        pass
+
     jar_path = build_stella_mod()
     if not jar_path:
         return None
