@@ -1,9 +1,6 @@
 import logging
 import os
 import sys
-
-sys.path.append("/usr/lib/python3/dist-packages")
-
 import threading
 import webview
 
@@ -29,7 +26,9 @@ def ensure_dirs():
 def set_window_icon(window):
     icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon-256.png")
     try:
-        import gi
+        gi = _import_gi()
+        if gi is None:
+            return
         gi.require_version("GdkPixbuf", "2.0")
         from gi.repository import GdkPixbuf
         if hasattr(window, 'native') and window.native:
@@ -37,6 +36,28 @@ def set_window_icon(window):
             window.native.set_icon(pixbuf)
     except Exception:
         pass
+
+
+def _import_gi():
+    try:
+        import gi
+        return gi
+    except ImportError:
+        for p in [
+            "/usr/lib/python3.12/site-packages",
+            "/usr/lib/python3.11/site-packages",
+            "/usr/lib/python3.10/site-packages",
+            "/usr/lib/python3/dist-packages",
+        ]:
+            if p not in sys.path:
+                sys.path.insert(0, p)
+            try:
+                import gi
+                return gi
+            except ImportError:
+                continue
+    logging.warning("gi module not found - window icon unavailable")
+    return None
 
 
 def start_ui():
