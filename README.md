@@ -42,3 +42,6 @@ cd stella-client
 ejecutalo:
 ./stella-client
 ``` 
+
+## 📄 Licencia
+Este proyecto está bajo la licencia MIT.
