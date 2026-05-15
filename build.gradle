@@ -1,0 +1,52 @@
+plugins {
+    id "fabric-loom" version "1.13-SNAPSHOT"
+    id "java-library"
+}
+
+base {
+    archivesName = project.archives_base_name
+}
+
+loom {
+    enableModProvidedJavadoc.set(false)
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    var replaceProperties = [
+            minecraft_version   : minecraft_version,
+            loader_version      : loader_version,
+            fabric_version      : fabric_version,
+            mod_id              : mod_id,
+            mod_name            : mod_name,
+            mod_version         : mod_version,
+            mod_description     : mod_description,
+    ]
+    inputs.properties replaceProperties
+    filteringCharset "UTF-8"
+    filesMatching("fabric.mod.json") {
+        expand replaceProperties
+    }
+}
+
+java {
+    withSourcesJar()
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = 21
+}

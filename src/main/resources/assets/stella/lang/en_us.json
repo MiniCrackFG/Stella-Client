@@ -1,0 +1,5 @@
+{
+    "stella.client.connected": "Connected to Stella",
+    "stella.client.disconnected": "Disconnected from Stella",
+    "stella.client.connecting": "Connecting..."
+}
