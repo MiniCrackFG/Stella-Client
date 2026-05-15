@@ -1,8 +1,30 @@
-build/
-dist/
-.env
-logs
-*.pyc
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
 venv/
+
+# IDE
 .vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.deb
+*.tar.gz
+*.jar
+*.pkg
+*.b64
+logs/
+.env
+.ruff_cache/
