@@ -1,40 +1,27 @@
-"""
-Discord RPC Module for Stella Client
-Handles all Discord Rich Presence functionality
-"""
-
 import logging
 from pypresence import Presence
 import time
 
-# Discord Application Configuration
-CLIENT_ID = 1503205471379783810
+logger = logging.getLogger(__name__)
 
-# Global RPC instance
+CLIENT_ID = 1503205471379783810
 rpc_instance = None
 
 
 def init_rpc():
-    """Initialize Discord RPC connection"""
     global rpc_instance
     try:
-        logging.info(f"[Discord RPC] Connecting with Application ID: {CLIENT_ID}")
+        logger.info("[Discord RPC] Connecting...")
         rpc_instance = Presence(CLIENT_ID)
         rpc_instance.connect()
-        time.sleep(0.5)
-        logging.info("✓ [Discord RPC] Connected successfully")
+        logger.info("[Discord RPC] Connected")
         return rpc_instance
     except Exception as e:
-        logging.info(f"✗ [Discord RPC] Connection failed: {e}")
-        logging.info("\n⚠️  Troubleshooting:")
-        logging.info("   1. Make sure Discord is running")
-        logging.info("   2. Verify the Application ID in Discord Developer Portal")
-        logging.info("   3. Set your Discord status to 'Online'")
+        logger.info(f"[Discord RPC] Connection failed: {e}")
         return None
 
 
 def update_playing():
-    """Update RPC status while playing Minecraft"""
     global rpc_instance
     if rpc_instance:
         try:
@@ -46,13 +33,12 @@ def update_playing():
                 large_text="Stella Client",
                 start=time.time()
             )
-            logging.info("✓ [Discord RPC] Status: Playing Minecraft")
+            logger.info("[Discord RPC] Status: Playing")
         except Exception as e:
-            logging.info(f"✗ [Discord RPC] Update failed: {e}")
+            logger.info(f"[Discord RPC] Update failed: {e}")
 
 
 def update_menu():
-    """Update RPC status in main menu"""
     global rpc_instance
     if rpc_instance:
         try:
@@ -64,24 +50,19 @@ def update_menu():
                 large_text="Stella Client",
                 start=time.time()
             )
-            logging.info("✓ [Discord RPC] Status: In Main Menu")
+            logger.info("[Discord RPC] Status: Menu")
         except Exception as e:
-            logging.info(f"✗ [Discord RPC] Update failed: {e}")
+            logger.info(f"[Discord RPC] Update failed: {e}")
 
 
 def close_rpc():
-    """Close Discord RPC connection"""
     global rpc_instance
     if rpc_instance:
         try:
-            # Primero clear la actividad
             rpc_instance.clear()
-            # Esperar 0.5 segundos para que Discord procese
-            time.sleep(0.5)
-            # Luego cierra la conexión
             rpc_instance.close()
-            logging.info("✓ [Discord RPC] Disconnected")
+            logger.info("[Discord RPC] Disconnected")
         except Exception as e:
-            logging.info(f"✗ [Discord RPC] Disconnect error: {e}")
+            logger.info(f"[Discord RPC] Disconnect error: {e}")
         finally:
             rpc_instance = None

@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-from pathlib import Path
 
 import launcher.minecraft as minecraft
 
@@ -107,12 +106,14 @@ def ensure_default_instance():
             if f.endswith(".jar"):
                 try:
                     shutil.move(os.path.join(default_mods, f), os.path.join(mods_dir, f))
-                except: pass
+                except Exception:
+                    pass
     old_reg = os.path.join(os.path.expanduser("~/.stellaclient"), "installed_mods.json")
     if os.path.exists(old_reg):
         try:
             shutil.move(old_reg, os.path.join(instance_dir, "installed_mods.json"))
-        except: pass
+        except Exception:
+            pass
     instance = {
         "id": "default",
         "name": "Default",

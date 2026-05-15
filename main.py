@@ -13,9 +13,16 @@ import launcher.minecraft as minecraft
 from api import API
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+
 def ensure_dirs():
     base = os.path.expanduser("~/.stellaclient")
-    for d in ["", "mods", "forge", "logs", "crash-reports", "versions"]:
+    for d in ["", "mods", "forge", "logs", "crash-reports", "versions", "instances"]:
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
 

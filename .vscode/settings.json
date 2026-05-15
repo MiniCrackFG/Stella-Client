@@ -1,0 +1,13 @@
+{
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "ruff.enable": true,
+    "ruff.ignoreStandardLibrary": true,
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.compile.nullAnalysis.mode": "disabled",
+    "files.exclude": {
+        "**/.ruff_cache": true,
+        "**/__pycache__": true,
+        "**/*.pyc": true
+    }
+}

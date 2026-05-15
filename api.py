@@ -7,17 +7,16 @@ import time
 
 sys.path.append("/usr/lib/python3/dist-packages")
 
-import gi
+import gi  # noqa: E402
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib
-
-import launcher.instances as instances
-import launcher.minecraft as minecraft
-import launcher.mods as mods
-import launcher.discord_rpc as discord_rpc
+from gi.repository import GLib  # noqa: E402
+import launcher.instances as instances  # noqa: E402
+import launcher.minecraft as minecraft  # noqa: E402
+import launcher.mods as mods  # noqa: E402
+import launcher.discord_rpc as discord_rpc  # noqa: E402
 
 _cache = {}
-_CACHE_TTL = 60  # seconds
+_CACHE_TTL = 60
 
 
 def _cached(key, ttl, func, *args, **kwargs):
@@ -35,18 +34,24 @@ class API:
         s = minecraft.load_settings()
         inst = self.get_current_instance()
         if inst:
-            if inst.get("version"): s["version"] = inst["version"]
-            if inst.get("ram"): s["ram"] = inst["ram"]
-            if inst.get("java_path"): s["java_path"] = inst["java_path"]
-            if inst.get("minecraft_dir"): s["minecraft_dir"] = inst["minecraft_dir"]
+            if inst.get("version"):
+                s["version"] = inst["version"]
+            if inst.get("ram"):
+                s["ram"] = inst["ram"]
+            if inst.get("java_path"):
+                s["java_path"] = inst["java_path"]
+            if inst.get("minecraft_dir"):
+                s["minecraft_dir"] = inst["minecraft_dir"]
         return s
 
     def save_settings(self, data):
+        if isinstance(data, str):
+            updates = json.loads(data)
+        else:
+            updates = data
         current = minecraft.load_settings()
-        updates = json.loads(data)
         current.update(updates)
         minecraft.save_settings(current)
-        # Also sync to current instance
         inst = self.get_current_instance()
         if inst:
             for key in ("version", "ram", "java_path"):
@@ -89,22 +94,27 @@ class API:
             "client_id": "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb",
             "device_code": device_code,
         }
-        resp = requests.post(
-            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
-            data=td, timeout=10,
-        )
-        if resp.status_code == 200:
-            return self._finish_microsoft_auth(resp.json())
-        elif resp.status_code != 400:
-            return {"error": f"HTTP {resp.status_code}"}
-        err = resp.json().get("error", "")
-        if err == "authorization_pending":
-            return {"status": "pending"}
-        elif err in ("authorization_declined", "expired_token"):
+        try:
+            resp = requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data=td, timeout=10,
+            )
+            if resp.status_code == 200:
+                return self._finish_microsoft_auth(resp.json())
+            elif resp.status_code != 400:
+                return {"error": f"HTTP {resp.status_code}"}
+            err = resp.json().get("error", "")
+            if err == "authorization_pending":
+                return {"status": "pending"}
+            elif err in ("authorization_declined", "expired_token"):
+                return {"error": err}
+            elif err == "slow_down":
+                return {"status": "pending", "slow_down": True}
             return {"error": err}
-        elif err == "slow_down":
-            return {"status": "pending", "slow_down": True}
-        return {"error": err}
+        except requests.exceptions.ConnectionError:
+            return {"error": "Connection failed"}
+        except Exception as e:
+            return {"error": str(e)}
 
     def _finish_microsoft_auth(self, tokens):
         try:
@@ -150,7 +160,6 @@ class API:
         inst = instances.get_instance(instance_id)
         if inst and inst.get("mods_dir"):
             os.environ["STELLA_MODS_DIR"] = inst["mods_dir"]
-        # Clear all caches so data reloads for the new instance
         _cache.clear()
         return {"ok": True}
 
@@ -165,12 +174,10 @@ class API:
         return None
 
     def detect_java(self):
-        import subprocess, glob
         javas = []
         seen = set()
 
-        # 1. Check java in PATH
-        for cmd in ["java", "java21", "java17", "java11", "java8"]:
+        for cmd in ["java", "java21", "java17"]:
             try:
                 r = subprocess.run(["which", cmd], capture_output=True, text=True, timeout=5)
                 if r.returncode == 0:
@@ -178,10 +185,16 @@ class API:
                     if path and path not in seen:
                         seen.add(path)
                         ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        javas.append({"path": path, "version": ver.stderr.strip().split('"')[1] if '"' in ver.stderr else ver.stderr.strip()[:50]})
-            except: pass
+                        version_str = ver.stderr.strip()
+                        if '"' in version_str:
+                            version_str = version_str.split('"')[1]
+                        else:
+                            version_str = version_str[:50]
+                        javas.append({"path": path, "version": version_str})
+            except Exception:
+                pass
 
-        # 2. Scan /usr/lib/jvm on Linux
+        import glob
         for jdir in sorted(glob.glob("/usr/lib/jvm/*"), reverse=True):
             for jbin in ["bin/java", "jre/bin/java"]:
                 path = os.path.join(jdir, jbin)
@@ -189,13 +202,20 @@ class API:
                     seen.add(path)
                     try:
                         ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        javas.append({"path": path, "version": ver.stderr.strip().split('"')[1] if '"' in ver.stderr else ver.stderr.strip()[:50]})
-                    except: pass
+                        version_str = ver.stderr.strip()
+                        if '"' in version_str:
+                            version_str = version_str.split('"')[1]
+                        else:
+                            version_str = version_str[:50]
+                        javas.append({"path": path, "version": version_str})
+                    except Exception:
+                        pass
 
         return javas
 
     def get_avatar(self, uuid=None):
-        import requests, base64
+        import requests
+        import base64
         try:
             ident = uuid or "steve"
             url = f"https://mc-heads.net/avatar/{ident}/128"
@@ -203,7 +223,7 @@ class API:
             if resp.status_code == 200 and resp.headers.get("Content-Type", "").startswith("image/"):
                 b64 = base64.b64encode(resp.content).decode()
                 return f"data:image/png;base64,{b64}"
-        except:
+        except Exception:
             pass
         return ""
 
@@ -218,7 +238,8 @@ class API:
             resp = requests.get(f"https://api.mcsrvstat.us/2/{address}", timeout=10)
             if resp.status_code == 200:
                 return resp.json()
-        except: pass
+        except Exception:
+            pass
         return {"error": "Could not fetch server info"}
 
     def get_versions_grouped(self):
@@ -236,7 +257,12 @@ class API:
     _launch_status = {"state": "stopped"}
 
     def _detect_java(self):
-        import time, psutil
+        try:
+            import psutil
+        except ImportError:
+            time.sleep(5)
+            self._launch_status["state"] = "playing"
+            return
         time.sleep(3)
         for _ in range(120):
             for proc in psutil.process_iter(['name']):
@@ -253,7 +279,6 @@ class API:
         threading.Thread(target=self._detect_java, daemon=True).start()
         def run():
             s = minecraft.load_settings()
-            # Apply current instance overrides
             instance = self.get_current_instance()
             if instance:
                 s["version"] = instance.get("version", s["version"])
@@ -377,17 +402,18 @@ class API:
         try:
             if hasattr(self, '_window'):
                 self._window.move(x, y)
-        except:
+        except Exception:
             pass
         return {"ok": True}
 
     def begin_window_move(self, button, root_x, root_y, timestamp):
+        if not hasattr(self, '_window') or not self._window:
+            return {"ok": False}
         try:
             native = self._window.native
             if native:
-                win = native
-                GLib.idle_add(lambda: win.begin_move_drag(int(button), int(root_x), int(root_y), int(timestamp)))
-        except Exception as e:
+                GLib.idle_add(lambda: native.begin_move_drag(int(button), int(root_x), int(root_y), int(timestamp)))
+        except Exception:
             pass
         return {"ok": True}
 
