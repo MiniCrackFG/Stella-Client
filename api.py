@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import subprocess
@@ -10,6 +11,8 @@ import launcher.minecraft as minecraft
 import launcher.mods as mods
 import launcher.discord_rpc as discord_rpc
 
+_gi_available = False
+
 
 def _open_url(url):
     try:
@@ -21,27 +24,15 @@ def _open_url(url):
 
 def _ensure_glib():
     try:
-        import gi
-        gi.require_version("Gtk", "3.0")
+        global _gi_available
+        if not _gi_available:
+            import gi
+            gi.require_version("Gtk", "3.0")
+            _gi_available = True
         from gi.repository import GLib
         return GLib
     except ImportError:
-        for p in [
-            "/usr/lib/python3.12/site-packages",
-            "/usr/lib/python3.11/site-packages",
-            "/usr/lib/python3.10/site-packages",
-            "/usr/lib/python3/dist-packages",
-        ]:
-            if p not in sys.path:
-                sys.path.insert(0, p)
-            try:
-                import gi
-                gi.require_version("Gtk", "3.0")
-                from gi.repository import GLib
-                return GLib
-            except (ImportError, ValueError):
-                continue
-    return None
+        return None
 
 _cache = {}
 _CACHE_TTL = 60
@@ -202,49 +193,47 @@ class API:
             return inst
         return None
 
+    def _get_java_version(self, path):
+        try:
+            ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
+            version_str = ver.stderr.strip()
+            if '"' in version_str:
+                return version_str.split('"')[1]
+            return version_str[:50]
+        except Exception:
+            return None
+
     def detect_java(self):
         javas = []
         seen = set()
 
-        for cmd in ["java", "java21", "java17"]:
+        for cmd in ("java", "java21", "java17"):
             try:
                 r = subprocess.run(["which", cmd], capture_output=True, text=True, timeout=5)
                 if r.returncode == 0:
                     path = r.stdout.strip()
                     if path and path not in seen:
                         seen.add(path)
-                        ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        version_str = ver.stderr.strip()
-                        if '"' in version_str:
-                            version_str = version_str.split('"')[1]
-                        else:
-                            version_str = version_str[:50]
-                        javas.append({"path": path, "version": version_str})
+                        version_str = self._get_java_version(path)
+                        if version_str:
+                            javas.append({"path": path, "version": version_str})
             except Exception:
                 pass
 
         import glob
         for jdir in sorted(glob.glob("/usr/lib/jvm/*"), reverse=True):
-            for jbin in ["bin/java", "jre/bin/java"]:
+            for jbin in ("bin/java", "jre/bin/java"):
                 path = os.path.join(jdir, jbin)
                 if os.path.exists(path) and path not in seen:
                     seen.add(path)
-                    try:
-                        ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        version_str = ver.stderr.strip()
-                        if '"' in version_str:
-                            version_str = version_str.split('"')[1]
-                        else:
-                            version_str = version_str[:50]
+                    version_str = self._get_java_version(path)
+                    if version_str:
                         javas.append({"path": path, "version": version_str})
-                    except Exception:
-                        pass
 
         return javas
 
     def get_avatar(self, uuid=None):
         import requests
-        import base64
         try:
             ident = uuid or "steve"
             url = f"https://mc-heads.net/avatar/{ident}/128"
@@ -412,30 +401,30 @@ class API:
             mods.download_forge(mc_version)
 
     def minimize(self):
-        if hasattr(self, '_window'):
+        if self._window:
             self._window.minimize()
         return {"ok": True}
 
     def maximize(self):
-        if hasattr(self, '_window'):
+        if self._window:
             self._window.maximize()
         return {"ok": True}
 
     def close_window(self):
-        if hasattr(self, '_window'):
+        if self._window:
             self._window.destroy()
         return {"ok": True}
 
     def move_window(self, x, y):
         try:
-            if hasattr(self, '_window'):
+            if self._window:
                 self._window.move(x, y)
         except Exception:
             pass
         return {"ok": True}
 
     def begin_window_move(self, button, root_x, root_y, timestamp):
-        if not hasattr(self, '_window') or not self._window:
+        if not self._window:
             return {"ok": False}
         glib = _ensure_glib()
         if not glib:

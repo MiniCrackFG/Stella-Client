@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import time
 
 import launcher.minecraft as minecraft
 
@@ -8,20 +9,30 @@ BASE_DIR = os.path.expanduser("~/.stellaclient")
 INSTANCES_DIR = os.path.join(BASE_DIR, "instances")
 INSTANCES_FILE = os.path.join(INSTANCES_DIR, "instances.json")
 
+_INSTANCES_CACHE = {}
+_INSTANCES_CACHE_TTL = 2
+
 
 def _ensure():
     os.makedirs(INSTANCES_DIR, exist_ok=True)
 
 
 def _load():
+    now = time.time()
+    cached = _INSTANCES_CACHE.get("instances")
+    if cached and now - cached["time"] < _INSTANCES_CACHE_TTL:
+        return cached["data"]
     _ensure()
     if not os.path.exists(INSTANCES_FILE):
         return {}
     with open(INSTANCES_FILE) as f:
-        return json.load(f)
+        data = json.load(f)
+    _INSTANCES_CACHE["instances"] = {"data": data, "time": now}
+    return data
 
 
 def _save(data):
+    _INSTANCES_CACHE.clear()
     _ensure()
     with open(INSTANCES_FILE, "w") as f:
         json.dump(data, f, indent=2)

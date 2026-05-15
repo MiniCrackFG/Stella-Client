@@ -9,6 +9,7 @@ import launcher.instances as instances
 import launcher.minecraft as minecraft
 from api import API
 
+_DISCORD_DAEMON = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,10 +17,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+_gi_available = False
 
-def ensure_dirs():
+
+def _ensure_dirs():
     base = os.path.expanduser("~/.stellaclient")
-    for d in ["", "mods", "forge", "logs", "crash-reports", "versions", "instances"]:
+    for d in ("", "mods", "forge", "logs", "crash-reports", "versions", "instances"):
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
 
@@ -38,8 +41,11 @@ def _set_default_icon():
     if not icon_path:
         return
     try:
-        import gi
-        gi.require_version("Gtk", "3.0")
+        global _gi_available
+        if not _gi_available:
+            import gi
+            gi.require_version("Gtk", "3.0")
+            _gi_available = True
         from gi.repository import Gtk
         Gtk.Window.set_default_icon_from_file(icon_path)
         logging.info("Default window icon set")
@@ -52,54 +58,38 @@ def set_window_icon(window):
     if not icon_path:
         return
     try:
-        if hasattr(window, 'set_icon'):
-            window.set_icon(icon_path)
-            logging.info("Icon set via window.set_icon")
-            return
+        window.set_icon(icon_path)
+        return
     except Exception:
         pass
     try:
-        import gi
-        gi.require_version("GdkPixbuf", "2.0")
+        global _gi_available
+        if not _gi_available:
+            import gi
+            gi.require_version("GdkPixbuf", "2.0")
+            _gi_available = True
         from gi.repository import GdkPixbuf
-        if hasattr(window, 'native') and window.native:
+        if window.native:
             pixbuf = GdkPixbuf.Pixbuf.new_from_file(icon_path)
             window.native.set_icon(pixbuf)
-            logging.info("Icon set via native Gtk window")
     except Exception as e:
         logging.warning("Could not set window icon: %s", e)
 
 
-def _import_gi():
-    try:
-        import gi
-        return gi
-    except ImportError:
-        for p in [
-            "/usr/lib/python3.12/site-packages",
-            "/usr/lib/python3.11/site-packages",
-            "/usr/lib/python3.10/site-packages",
-            "/usr/lib/python3/dist-packages",
-        ]:
-            if p not in sys.path:
-                sys.path.insert(0, p)
-            try:
-                import gi
-                return gi
-            except ImportError:
-                continue
-    logging.warning("gi module not found - window icon unavailable")
-    return None
+def _start_discord_rpc():
+    discord_rpc.init_rpc()
+    discord_rpc.update_menu()
 
 
 def start_ui():
-    ensure_dirs()
+    _ensure_dirs()
     instances.ensure_default_instance()
     settings = minecraft.load_settings()
     api = API()
 
     if settings.get("discord_rpc", True):
-        threading.Thread(target=lambda: [discord_rpc.init_rpc(), discord_rpc.update_menu()], daemon=True).start()
+        t = threading.Thread(target=_start_discord_rpc, daemon=True)
+        t.start()
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
 

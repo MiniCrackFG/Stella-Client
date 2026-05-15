@@ -65,45 +65,7 @@
 #splash.hide .splash-sub  { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .1s; }
 #splash.hide .splash-loader { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .15s; }
 
-#splash.show {
-  pointer-events: auto;
-}
-#splash .splash-star,
-#splash .splash-title,
-#splash .splash-sub,
-#splash .splash-loader {
-  opacity: 0;
-  transition: opacity .3s ease, transform .3s ease;
-}
-#splash .splash-star { animation: starSpin 2s ease-in-out .4s infinite; transition-delay: 0s; }
-#splash .splash-title { transform: translateY(16px); transition-delay: .05s; }
-#splash .splash-sub  { transform: translateY(16px); transition-delay: .1s; }
-#splash .splash-loader { transform: translateY(16px); transition-delay: .15s; }
 
-#splash.show .splash-star { opacity: 1; }
-#splash.show .splash-title,
-#splash.show .splash-sub,
-#splash.show .splash-loader { opacity: 1; transform: translateY(0); }
-
-#splash.hide {
-  pointer-events: none;
-  background: rgba(10,10,10,0);
-  -webkit-backdrop-filter: blur(0px);
-  backdrop-filter: blur(0px);
-  transition: background .5s ease .15s, backdrop-filter .5s ease .15s, -webkit-backdrop-filter .5s ease .15s;
-}
-#splash.hide .splash-star { opacity: 0; transition: opacity .5s ease; transition-delay: 0s; }
-#splash.hide .splash-title { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .05s; }
-#splash.hide .splash-sub  { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .1s; }
-#splash.hide .splash-loader { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .15s; }
-.splash-star {
-  width: 56px; height: 56px;
-  filter: drop-shadow(0 0 12px rgba(168,85,247,.4));
-}
-@keyframes starSpin {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  50% { transform: rotate(180deg) scale(1.1); }
-}
 .splash-title {
   font-size: 36px; font-weight: 800;
   letter-spacing: 2px;

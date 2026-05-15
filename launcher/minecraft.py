@@ -3,6 +3,8 @@ import subprocess
 import minecraft_launcher_lib
 import os
 import json
+import time
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +14,16 @@ MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
 
 MICROSOFT_CLIENT_ID = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"
 
+_SETTINGS_CACHE = {}
+_SETTINGS_CACHE_TTL = 2
+
 
 def load_settings():
+    now = time.time()
+    cached = _SETTINGS_CACHE.get("settings")
+    if cached and now - cached["time"] < _SETTINGS_CACHE_TTL:
+        return cached["data"]
+
     default_settings = {
         "ram": 4,
         "version": "1.21.11",
@@ -28,12 +38,15 @@ def load_settings():
 
     try:
         with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+        _SETTINGS_CACHE["settings"] = {"data": data, "time": now}
+        return data
     except Exception:
         return default_settings
 
 
 def save_settings(data):
+    _SETTINGS_CACHE.clear()
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
@@ -72,33 +85,25 @@ def get_device_code_info():
     return resp.json()
 
 
-def _finish_auth(tokens):
-    import minecraft_launcher_lib.microsoft_account as ma
-    xbl = ma.authenticate_with_xbl(tokens["access_token"])
-    uhs = xbl.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs", "")
-    xsts = ma.authenticate_with_xsts(xbl["Token"])
-    mc = ma.authenticate_with_minecraft(uhs, xsts["Token"])
-    profile = ma.get_profile(mc["access_token"])
-    auth_info = {
-        "access_token": tokens["access_token"],
-        "refresh_token": tokens.get("refresh_token", ""),
-        "xbl_token": xbl["Token"],
-        "xsts_token": xsts["Token"],
-        "mc_access_token": mc["access_token"],
-        "uuid": profile["id"],
-        "username": profile["name"],
-    }
-    save_auth(auth_info)
-    return profile["name"]
+
+
+
+def _invalidate_cache():
+    _SETTINGS_CACHE.clear()
+    get_available_versions.cache_clear()
 
 
 def logout():
+    _invalidate_cache()
     if os.path.exists(AUTH_FILE):
         os.remove(AUTH_FILE)
 
 
 def login_offline(username):
-    logout()
+    _invalidate_cache()
+    auth_file = AUTH_FILE
+    if os.path.exists(auth_file):
+        os.remove(auth_file)
     username = username.strip() or "Player"
     settings = load_settings()
     settings["username"] = username
@@ -131,18 +136,21 @@ def clear_offline_account():
     save_settings(settings)
 
 
+def _sort_versions(v):
+    parts = v.split(".")
+    return [int(x) for x in parts]
+
+
+@lru_cache(maxsize=1)
 def get_available_versions():
     try:
         manifest = minecraft_launcher_lib.utils.get_version_list()
         all_v = [v["id"] for v in manifest if v["type"] == "release"]
         filtered = [v for v in all_v if v.startswith(("26.", "1.8","1.9","1.10","1.11","1.12","1.13","1.14","1.15","1.16","1.17","1.18","1.19","1.20","1.21"))]
-        def sort_key(v):
-            parts = v.split(".")
-            return [int(x) for x in parts]
-        filtered.sort(key=sort_key, reverse=True)
+        filtered.sort(key=_sort_versions, reverse=True)
         return filtered
     except Exception as e:
-        logger.warning(f"Failed to fetch versions: {e}")
+        logger.warning("Failed to fetch versions: %s", e)
         return ["26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.1", "1.21", "1.20.4", "1.20.1", "1.20", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.13.2", "1.12.2", "1.11.2", "1.10.2", "1.9.4", "1.8.9"]
 
 
