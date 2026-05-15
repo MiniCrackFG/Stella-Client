@@ -1,6 +1,7 @@
 package com.stella.client.ui;
 
 import com.stella.client.StellaClient;
+import com.stella.client.StellaClientMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractButton;
@@ -12,9 +13,11 @@ import net.minecraft.network.chat.Component;
 
 public class StellaScreen extends Screen {
     private static final int PANEL_WIDTH = 320;
-    private static final int PANEL_HEIGHT = 280;
+    private static final int PANEL_HEIGHT = 300;
 
     private int panelX, panelY;
+    private AbstractButton connectButton;
+    private boolean wasConnected = false;
 
     public StellaScreen() {
         super(Component.literal("Stella Client"));
@@ -26,19 +29,37 @@ public class StellaScreen extends Screen {
         panelY = (height - PANEL_HEIGHT) / 2;
 
         int cx = width / 2;
-        int by = panelY + 130;
+        int by = panelY + 110;
 
-        addRenderableWidget(new ModernButton(cx - 90, by, 180, 32,
-                Component.literal("Connect to Stella"),
-                () -> StellaClient.getInstance().getConnection().connect()));
+        connectButton = new ModernButton(cx - 90, by, 180, 32,
+                Component.literal("Connect"),
+                () -> {
+                    var conn = StellaClient.getInstance().getConnection();
+                    if (conn.isConnected()) {
+                        conn.disconnect();
+                    } else {
+                        conn.connect();
+                    }
+                });
+
+        addRenderableWidget(connectButton);
 
         addRenderableWidget(new ModernButton(cx - 90, by + 42, 180, 32,
                 Component.literal("Settings"),
-                () -> {}));
+                () -> minecraft.setScreen(new StellaSettingsScreen(this))));
 
         addRenderableWidget(new ModernButton(cx - 90, by + 84, 180, 32,
                 Component.literal("Close"),
                 () -> onClose()));
+    }
+
+    @Override
+    public void tick() {
+        boolean nowConnected = StellaClient.getInstance().getConnection().isConnected();
+        if (nowConnected != wasConnected) {
+            wasConnected = nowConnected;
+            connectButton.setMessage(Component.literal(nowConnected ? "Disconnect" : "Connect"));
+        }
     }
 
     @Override
@@ -48,22 +69,30 @@ public class StellaScreen extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float delta) {
-        renderBackground(guiGraphics, mouseX, mouseY, delta);
+        super.renderBackground(guiGraphics, mouseX, mouseY, delta);
 
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xC81A1A2E);
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + 1, 0xFF6B8CFF);
 
         int cx = width / 2;
         guiGraphics.drawCenteredString(font, Component.literal("Stella Client"),
-                cx, panelY + 30, 0xFFFFFF);
+                cx, panelY + 25, 0xFFFFFF);
 
-        var connected = StellaClient.getInstance().getConnection().isConnected();
+        var conn = StellaClient.getInstance().getConnection();
+        boolean connected = conn.isConnected();
         int statusColor = connected ? 0x55FF55 : 0xFF5555;
-        String statusText = connected ? "● Connected" : "● Disconnected";
-        guiGraphics.drawCenteredString(font, Component.literal(statusText),
-                cx, panelY + 55, statusColor);
+        String statusIcon = connected ? "●" : "○";
+        String statusLabel = connected ? "Connected" : "Disconnected";
+        guiGraphics.drawCenteredString(font,
+                Component.literal(statusIcon + " " + statusLabel),
+                cx, panelY + 48, statusColor);
 
-        guiGraphics.fill(panelX + 40, panelY + PANEL_HEIGHT - 30, panelX + PANEL_WIDTH - 40, panelY + PANEL_HEIGHT - 29, 0x96333355);
+        guiGraphics.fill(panelX + 40, panelY + PANEL_HEIGHT - 35, panelX + PANEL_WIDTH - 40, panelY + PANEL_HEIGHT - 34, 0x96333355);
+
+        String version = StellaClientMod.MOD_VERSION;
+        guiGraphics.drawCenteredString(font,
+                Component.literal("v" + version),
+                cx, panelY + PANEL_HEIGHT - 22, 0x555555);
 
         super.render(guiGraphics, mouseX, mouseY, delta);
     }
@@ -83,7 +112,7 @@ public class StellaScreen extends Screen {
         return super.keyPressed(keyEvent);
     }
 
-    private static class ModernButton extends AbstractButton {
+    public static class ModernButton extends AbstractButton {
         private static final int NORMAL = 0x802A2A4A;
         private static final int HOVERED = 0xCC3A3A6A;
 

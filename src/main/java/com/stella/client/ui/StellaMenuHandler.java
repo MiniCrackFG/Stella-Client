@@ -8,12 +8,15 @@ import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 public class StellaMenuHandler {
+    public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("stella-client", "category"));
+
     private static KeyMapping menuKeyBinding;
     private static boolean wasRightShiftDown = false;
 
@@ -22,7 +25,7 @@ public class StellaMenuHandler {
                 "key.stella.open_menu",
                 InputConstants.Type.KEYSYM,
                 344,
-                KeyMapping.Category.MISC
+                CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
