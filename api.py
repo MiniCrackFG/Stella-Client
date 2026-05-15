@@ -261,10 +261,10 @@ class API:
                 s["java_path"] = instance.get("java_path", s.get("java_path", "java"))
                 s["minecraft_dir"] = instance.get("minecraft_dir", s.get("minecraft_dir", os.path.expanduser("~/.stellaclient")))
                 minecraft.save_settings(s)
-                # Mods dir for instance
                 inst_mods = instance.get("mods_dir")
                 if inst_mods:
                     os.environ["STELLA_MODS_DIR"] = inst_mods
+            mods.install_stella_mod()
             if s.get("discord_rpc", True):
                 discord_rpc.update_playing()
             minecraft.launch_minecraft()
@@ -273,6 +273,13 @@ class API:
             self._launch_status["state"] = "stopped"
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True}
+
+    def install_stella_mod(self):
+        result = mods.install_stella_mod()
+        if result:
+            self._clear_browse_cache()
+            return {"ok": True, "path": result}
+        return {"ok": False, "error": "Failed to build/install Stella mod"}
 
     def get_launch_status(self):
         return self._launch_status

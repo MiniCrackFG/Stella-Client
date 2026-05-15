@@ -2,6 +2,8 @@ import logging
 import requests
 import json
 import os
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 
@@ -323,6 +325,49 @@ def get_installed_mods(project_type=None):
             "thumbnail": info.get("thumbnail", "") if info else "",
         })
     return mods
+
+STELLA_MOD_DIR = Path(__file__).parent.parent.parent / "stella-client-mod"
+
+def set_stella_mod_dir(path):
+    global STELLA_MOD_DIR
+    STELLA_MOD_DIR = Path(path)
+
+def build_stella_mod():
+    """Build the Stella Client mod using Gradle and return the jar path"""
+    mod_dir = STELLA_MOD_DIR
+    if not mod_dir.exists():
+        logging.info(f"Stella mod directory not found at {mod_dir}")
+        return None
+
+    logging.info(f"Building Stella mod in {mod_dir}...")
+    result = subprocess.run(
+        [str(mod_dir / "gradlew"), "build"],
+        cwd=str(mod_dir),
+        capture_output=True, text=True, timeout=120
+    )
+    if result.returncode != 0:
+        logging.error(f"Stella mod build failed:\n{result.stderr}")
+        return None
+
+    jars = list((mod_dir / "build" / "libs").glob("*.jar"))
+    mod_jar = next((j for j in jars if not j.name.endswith("-sources.jar")), None)
+    if mod_jar and mod_jar.exists():
+        logging.info(f"Stella mod built: {mod_jar}")
+        return str(mod_jar)
+    return None
+
+
+def install_stella_mod():
+    """Build and install the Stella Client mod into the current mods directory"""
+    jar_path = build_stella_mod()
+    if not jar_path:
+        return None
+
+    mods_dir = get_mods_dir()
+    shutil.copy2(jar_path, mods_dir / "stella-client.jar")
+    logging.info(f"Installed Stella mod to {mods_dir / 'stella-client.jar'}")
+    return str(mods_dir / "stella-client.jar")
+
 
 def delete_mod(filename):
     """Delete an installed mod"""
