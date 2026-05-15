@@ -5,15 +5,35 @@ import sys
 import threading
 import time
 
-sys.path.append("/usr/lib/python3/dist-packages")
+import launcher.instances as instances
+import launcher.minecraft as minecraft
+import launcher.mods as mods
+import launcher.discord_rpc as discord_rpc
 
-import gi  # noqa: E402
-gi.require_version("Gtk", "3.0")
-from gi.repository import GLib  # noqa: E402
-import launcher.instances as instances  # noqa: E402
-import launcher.minecraft as minecraft  # noqa: E402
-import launcher.mods as mods  # noqa: E402
-import launcher.discord_rpc as discord_rpc  # noqa: E402
+
+def _ensure_glib():
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import GLib
+        return GLib
+    except ImportError:
+        for p in [
+            "/usr/lib/python3.12/site-packages",
+            "/usr/lib/python3.11/site-packages",
+            "/usr/lib/python3.10/site-packages",
+            "/usr/lib/python3/dist-packages",
+        ]:
+            if p not in sys.path:
+                sys.path.insert(0, p)
+            try:
+                import gi
+                gi.require_version("Gtk", "3.0")
+                from gi.repository import GLib
+                return GLib
+            except (ImportError, ValueError):
+                continue
+    return None
 
 _cache = {}
 _CACHE_TTL = 60
@@ -411,10 +431,13 @@ class API:
     def begin_window_move(self, button, root_x, root_y, timestamp):
         if not hasattr(self, '_window') or not self._window:
             return {"ok": False}
+        glib = _ensure_glib()
+        if not glib:
+            return {"ok": False}
         try:
             native = self._window.native
             if native:
-                GLib.idle_add(lambda: native.begin_move_drag(int(button), int(root_x), int(root_y), int(timestamp)))
+                glib.idle_add(lambda: native.begin_move_drag(int(button), int(root_x), int(root_y), int(timestamp)))
         except Exception:
             pass
         return {"ok": True}
