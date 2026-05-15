@@ -276,22 +276,25 @@ def launch_minecraft():
     version = settings["version"]
     ram_argument = f"-Xmx{settings['ram']}G"
 
+    # Usar el minecraft_dir de la instancia si está configurado
+    game_dir = settings.get("minecraft_dir", MINECRAFT_DIR)
+
     logging.info(f"--- Iniciando Stella Client ---")
     logging.info(f"Versión configurada: {version}")
     logging.info(f"Asignando: {ram_argument}")
+    logging.info(f"Directorio: {game_dir}")
 
     # 2. Asegurar que el directorio existe
-    if not os.path.exists(MINECRAFT_DIR):
-        os.makedirs(MINECRAFT_DIR, exist_ok=True)
+    os.makedirs(game_dir, exist_ok=True)
 
     # 3. Verificar si hay mods instalados
-    mods_dir = os.environ.get("STELLA_MODS_DIR", os.path.join(MINECRAFT_DIR, "mods"))
+    mods_dir = os.environ.get("STELLA_MODS_DIR", os.path.join(game_dir, "mods"))
     has_mods = os.path.exists(mods_dir) and len([f for f in os.listdir(mods_dir) if f.endswith('.jar')]) > 0
 
     if has_mods:
         logging.info(f"Instalando Fabric para {version}...")
         try:
-            minecraft_launcher_lib.fabric.install_fabric(version, MINECRAFT_DIR)
+            minecraft_launcher_lib.fabric.install_fabric(version, game_dir)
             logging.info("✓ Fabric instalado correctamente")
         except Exception as e:
             logging.info(f"Error instalando Fabric: {e}")
@@ -303,7 +306,7 @@ def launch_minecraft():
         logging.info(f"Instalando Minecraft {version} (vanilla)...")
         minecraft_launcher_lib.install.install_minecraft_version(
             version,
-            MINECRAFT_DIR
+            game_dir
         )
 
     # 4. Verificar autenticación
@@ -335,7 +338,7 @@ def launch_minecraft():
         logging.info(f"Lanzando con Fabric (con mods) - versión: {fabric_version}...")
         command = minecraft_launcher_lib.command.get_minecraft_command(
             fabric_version,
-            MINECRAFT_DIR,
+            game_dir,
             options
         )
     else:
@@ -343,7 +346,7 @@ def launch_minecraft():
         logging.info("Lanzando vanilla...")
         command = minecraft_launcher_lib.command.get_minecraft_command(
             version,
-            MINECRAFT_DIR,
+            game_dir,
             options
         )
 
