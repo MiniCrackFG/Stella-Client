@@ -1,12 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('ui', 'ui'), ('launcher', 'launcher'), ('assets', 'assets')],
-    hiddenimports=['optparse', 'gi', 'gi.repository.GLib', 'gi.repository.GObject', 'gi.repository.GdkPixbuf', 'gi.repository.Gtk'],
+    hiddenimports=[
+        'optparse',
+        'gi',
+        'gi.repository.GLib',
+        'gi.repository.GObject',
+        'gi.repository.GdkPixbuf',
+        'gi.repository.Gtk',
+        'gi.repository.Gio',
+        'gi.repository.WebKit2',
+        'gi.repository.JavaScriptCore',
+        'gi.repository.Pango',
+        'gi.repository.PangoCairo',
+        'gi.repository.cairo',
+        'gi.repository.HarfBuzz',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

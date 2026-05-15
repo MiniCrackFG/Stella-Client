@@ -23,19 +23,51 @@ def ensure_dirs():
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
 
-def set_window_icon(window):
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon-256.png")
+def _find_asset(name):
+    for base in (os.path.dirname(__file__), getattr(sys, '_MEIPASS', None)):
+        if base:
+            for sub in ("assets", "ui"):
+                p = os.path.join(base, sub, name)
+                if os.path.exists(p):
+                    return p
+    return os.path.join(os.path.dirname(__file__), "assets", name)
+
+
+def _set_default_icon():
+    icon_path = _find_asset("icon-256.png")
+    if not icon_path:
+        return
     try:
-        gi = _import_gi()
-        if gi is None:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+        Gtk.Window.set_default_icon_from_file(icon_path)
+        logging.info("Default window icon set")
+    except Exception as e:
+        logging.warning("Could not set default icon: %s", e)
+
+
+def set_window_icon(window):
+    icon_path = _find_asset("icon-256.png")
+    if not icon_path:
+        return
+    try:
+        if hasattr(window, 'set_icon'):
+            window.set_icon(icon_path)
+            logging.info("Icon set via window.set_icon")
             return
+    except Exception:
+        pass
+    try:
+        import gi
         gi.require_version("GdkPixbuf", "2.0")
         from gi.repository import GdkPixbuf
         if hasattr(window, 'native') and window.native:
             pixbuf = GdkPixbuf.Pixbuf.new_from_file(icon_path)
             window.native.set_icon(pixbuf)
-    except Exception:
-        pass
+            logging.info("Icon set via native Gtk window")
+    except Exception as e:
+        logging.warning("Could not set window icon: %s", e)
 
 
 def _import_gi():
@@ -70,6 +102,8 @@ def start_ui():
         threading.Thread(target=lambda: [discord_rpc.init_rpc(), discord_rpc.update_menu()], daemon=True).start()
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
+
+    _set_default_icon()
 
     window = webview.create_window(
         title="Stella Client",
