@@ -15,3 +15,10 @@ Un launcher moderno de Minecraft con soporte para mods Fabric, Discord Rich Pres
 - 🎨 Interfaz moderna con tema oscuro/light/OLED
 - 🔄 Actualización automática del mod Stella Client
 - 🖥️ Compatible con VulkanMod
+
+# Instalación
+
+## Desde .deb
+
+```bash
+sudo dpkg -i stella-client_0.1.0_amd64.deb
