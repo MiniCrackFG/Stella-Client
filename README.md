@@ -1,14 +1,12 @@
 # Stella Client
 
-![GitHub release](https://img.shields.io/github/v/release/MiniCrackFG/Stella-Client)
-![GitHub downloads](https://img.shields.io/github/downloads/MiniCrackFG/Stella-Client/total)
-![License](https://img.shields.io/github/license/MiniCrackFG/Stella-Client)
-![Stars](https://img.shields.io/github/stars/MiniCrackFG/Stella-Client)
-![Issues](https://img.shields.io/github/issues/MiniCrackFG/Stella-Client)
-![Python](https://img.shields.io/badge/Python-3.x-blue)
-![Platform](https://img.shields.io/badge/Linux-supported-success)
-
-# Stella Client
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/MiniCrackFG/Stella-Client?display_name=tag&style=flat-square)
+![GitHub downloads](https://img.shields.io/github/downloads/MiniCrackFG/Stella-Client/total?style=flat-square)
+![GitHub Repo stars](https://img.shields.io/github/stars/MiniCrackFG/Stella-Client?style=flat-square)
+![GitHub issues](https://img.shields.io/github/issues/MiniCrackFG/Stella-Client?style=flat-square)
+![GitHub license](https://img.shields.io/github/license/MiniCrackFG/Stella-Client?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.x-blue?style=flat-square&logo=python)
+![Platform](https://img.shields.io/badge/Linux-supported-success?style=flat-square&logo=linux)
 
 <img width="1917" height="1034" alt="image" src="https://github.com/user-attachments/assets/8be878d9-1701-4246-8ca3-dc46a588652e" />
 
