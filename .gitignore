@@ -27,3 +27,6 @@ Thumbs.db
 logs/
 .env
 .ruff_cache/
+
+# VS Code
+.vscode/
