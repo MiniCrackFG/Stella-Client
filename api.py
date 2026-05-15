@@ -30,6 +30,8 @@ def _cached(key, ttl, func, *args, **kwargs):
 
 
 class API:
+    _window = None
+
     def get_settings(self):
         s = minecraft.load_settings()
         inst = self.get_current_instance()

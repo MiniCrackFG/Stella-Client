@@ -1,0 +1,9 @@
+[tool.pyright]
+typeCheckingMode = "off"
+reportMissingImports = false
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

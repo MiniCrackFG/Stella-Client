@@ -229,6 +229,11 @@ def download_mod(mod_id, mc_version="1.20.1", source="modrinth", project_type="m
     return None
 
 
+def download_forge(mc_version):
+    logger.info(f"Forge download for {mc_version} not yet implemented")
+    return None
+
+
 def get_installed_mods(project_type=None):
     installed_map = {}
     if os.path.exists(_INSTALLED_FILE):
