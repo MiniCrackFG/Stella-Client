@@ -5,6 +5,10 @@
     "build",
     "dist"
   ],
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportPrivateImportUsage": "none",
+    "reportMissingModuleSource": "none"
+  },
   "files.exclude": {
     "venv": true,
     ".venv": true,

@@ -3,6 +3,10 @@ typeCheckingMode = "off"
 reportMissingImports = false
 reportAttributeAccessIssue = false
 reportOptionalMemberAccess = false
+reportPrivateImportUsage = false
+reportMissingModuleSource = false
+reportGeneralTypeIssues = false
+exclude = ["venv", ".venv", "build", "dist"]
 
 [tool.ruff]
 line-length = 120
