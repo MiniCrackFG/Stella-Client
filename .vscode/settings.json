@@ -1,0 +1,22 @@
+{
+  "python.analysis.exclude": [
+    "venv",
+    ".venv",
+    "build",
+    "dist"
+  ],
+  "files.exclude": {
+    "venv": true,
+    ".venv": true,
+    "build": true,
+    "dist": true,
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "venv": true,
+    ".venv": true,
+    "build": true,
+    "dist": true
+  }
+}
