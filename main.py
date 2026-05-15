@@ -7,6 +7,7 @@ import webview
 import launcher.discord_rpc as discord_rpc
 import launcher.instances as instances
 import launcher.minecraft as minecraft
+import launcher.server as ws_server
 from api import API
 
 _DISCORD_DAEMON = None
@@ -87,9 +88,10 @@ def start_ui():
     settings = minecraft.load_settings()
     api = API()
 
+    threading.Thread(target=ws_server.start, daemon=True).start()
+
     if settings.get("discord_rpc", True):
-        t = threading.Thread(target=_start_discord_rpc, daemon=True)
-        t.start()
+        threading.Thread(target=_start_discord_rpc, daemon=True).start()
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
 
@@ -116,6 +118,7 @@ def start_ui():
 
     if window and window.events:
         window.events.closing += discord_rpc.close_rpc
+        window.events.closing += ws_server.stop
 
     webview.start(debug=False, func=lambda: set_window_icon(window))
 
