@@ -52,8 +52,7 @@ public class StellaSettingsScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent keyEvent) {
-        int code = keyEvent.key();
-        if (code == 344 || code == 340 || code == 256) {
+        if (keyEvent.key() == 256) {
             minecraft.setScreen(parent);
             return true;
         }

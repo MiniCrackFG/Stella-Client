@@ -104,8 +104,7 @@ public class StellaScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent keyEvent) {
-        int code = keyEvent.key();
-        if (code == 344 || code == 340) {
+        if (keyEvent.key() == 256) {
             onClose();
             return true;
         }

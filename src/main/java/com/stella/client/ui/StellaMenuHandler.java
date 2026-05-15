@@ -16,6 +16,7 @@ import net.minecraft.world.item.ItemStack;
 
 public class StellaMenuHandler {
     public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("stella-client", "category"));
+    private static final int RIGHT_SHIFT_KEY = 344;
 
     private static KeyMapping menuKeyBinding;
     private static boolean wasRightShiftDown = false;
@@ -24,7 +25,7 @@ public class StellaMenuHandler {
         menuKeyBinding = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.stella.open_menu",
                 InputConstants.Type.KEYSYM,
-                344,
+                RIGHT_SHIFT_KEY,
                 CATEGORY
         ));
 
@@ -36,7 +37,7 @@ public class StellaMenuHandler {
                 return;
             }
 
-            boolean isDown = InputConstants.isKeyDown(client.getWindow(), 344);
+            boolean isDown = InputConstants.isKeyDown(client.getWindow(), RIGHT_SHIFT_KEY);
             if (isDown && !wasRightShiftDown) {
                 openMenu(client);
             }
