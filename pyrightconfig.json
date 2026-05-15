@@ -1,0 +1,12 @@
+{
+  "exclude": ["venv", ".venv", "build", "dist"],
+  "typeCheckingMode": "off",
+  "reportMissingImports": false,
+  "reportAttributeAccessIssue": false,
+  "reportOptionalMemberAccess": false,
+  "reportPrivateImportUsage": false,
+  "reportMissingModuleSource": false,
+  "reportGeneralTypeIssues": false,
+  "reportMissingTypeStubs": false,
+  "reportUndefinedVariable": false
+}
