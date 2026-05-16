@@ -54,11 +54,11 @@ public class StellaScreen extends Screen {
 
         int cx = width / 2;
         guiGraphics.drawCenteredString(font, Component.literal("Stella Client"),
-                cx, panelY + 25, 0xFFFFFF);
+                cx, panelY + 25, 0xFFFFFFFF);
 
         var conn = StellaClient.getInstance().getConnection();
         boolean connected = conn.isConnected();
-        int statusColor = connected ? 0x55FF55 : 0xFF5555;
+        int statusColor = connected ? 0xFF55FF55 : 0xFFFF5555;
         guiGraphics.drawCenteredString(font,
                 Component.literal((connected ? "●" : "○") + " " + (connected ? "Connected" : "Disconnected")),
                 cx, panelY + 48, statusColor);
@@ -66,7 +66,7 @@ public class StellaScreen extends Screen {
         guiGraphics.fill(panelX + 40, panelY + PANEL_HEIGHT - 35, panelX + PANEL_WIDTH - 40, panelY + PANEL_HEIGHT - 34, 0x96333355);
         guiGraphics.drawCenteredString(font,
                 Component.literal("v" + StellaClientMod.MOD_VERSION),
-                cx, panelY + PANEL_HEIGHT - 22, 0x555555);
+                cx, panelY + PANEL_HEIGHT - 22, 0xFF555555);
 
         super.render(guiGraphics, mouseX, mouseY, delta);
     }
@@ -88,6 +88,8 @@ public class StellaScreen extends Screen {
     public static class ModernButton extends AbstractButton {
         private static final int NORMAL = 0x802A2A4A;
         private static final int HOVERED = 0xCC3A3A6A;
+        private static final int TEXT_NORMAL = 0xFFCCCCCC;
+        private static final int TEXT_HOVERED = 0xFFFFFFFF;
 
         private final Runnable onClick;
 
@@ -104,7 +106,7 @@ public class StellaScreen extends Screen {
             guiGraphics.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), bg);
             guiGraphics.fill(getX(), getY(), getX() + getWidth(), getY() + 1, 0xFF6B8CFF);
 
-            int color = isHoveredOrFocused() ? 0xFFFFFF : 0xAAAAAA;
+            int color = isHoveredOrFocused() ? TEXT_HOVERED : TEXT_NORMAL;
             guiGraphics.drawCenteredString(Minecraft.getInstance().font, getMessage(),
                     getX() + getWidth() / 2, getY() + (getHeight() - 8) / 2, color);
         }

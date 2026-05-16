@@ -52,12 +52,12 @@ public class StellaSettingsScreen extends Screen {
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xC81A1A2E);
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + 1, 0xFF6B8CFF);
         guiGraphics.drawCenteredString(font, Component.literal("Settings"),
-                width / 2, panelY + 25, 0xFFFFFF);
+                width / 2, panelY + 25, 0xFFFFFFFF);
 
         var conn = StellaClient.getInstance().getConnection();
         String status = conn.isConnected() ? "§a● Connected" : "§7○ Disconnected";
         guiGraphics.drawCenteredString(font, Component.literal("Server: " + status),
-                width / 2, panelY + 50, 0xAAAAAA);
+                width / 2, panelY + 50, 0xFFAAAAAA);
 
         super.render(guiGraphics, mouseX, mouseY, delta);
     }

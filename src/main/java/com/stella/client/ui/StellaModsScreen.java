@@ -70,7 +70,7 @@ public class StellaModsScreen extends Screen {
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, 0xC81A1A2E);
         guiGraphics.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + 1, 0xFF6B8CFF);
         guiGraphics.drawCenteredString(font, Component.literal("Mods (" + mods.size() + ")"),
-                width / 2, panelY + 18, 0xFFFFFF);
+                width / 2, panelY + 18, 0xFFFFFFFF);
 
         int y = panelY + 44;
         int x = panelX + 20;
@@ -91,9 +91,9 @@ public class StellaModsScreen extends Screen {
                 }
             }
             guiGraphics.drawString(font, Component.literal(mod.name()),
-                    x + 4, drawY + 6, 0xCCCCCC);
+                    x + 4, drawY + 6, 0xFFCCCCCC);
             guiGraphics.drawString(font, Component.literal(sizeStr),
-                    x + PANEL_WIDTH - 100, drawY + 6, 0x666666);
+                    x + PANEL_WIDTH - 100, drawY + 6, 0xFF666666);
         }
 
         super.render(guiGraphics, mouseX, mouseY, delta);
