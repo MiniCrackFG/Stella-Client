@@ -1,5 +1,6 @@
 package com.stella.client;
 
+import com.stella.client.feature.FeatureManager;
 import com.stella.client.network.StellaConnection;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -24,11 +25,7 @@ public class StellaClient {
         LOGGER.info("Initializing Stella Client instance");
 
         connection = new StellaConnection("ws://localhost:17523");
-
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            LOGGER.info("Joined world, connecting to Stella server...");
-            connection.connect();
-        });
+        FeatureManager.getInstance().init();
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             LOGGER.info("Shutting down Stella Client");

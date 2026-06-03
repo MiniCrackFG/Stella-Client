@@ -14,6 +14,8 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.List;
+
 public class StellaMenuHandler {
     public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("stella-client", "category"));
 
@@ -60,8 +62,14 @@ public class StellaMenuHandler {
         return stack.isEmpty();
     }
 
+    private static final List<Class<?>> STELLA_SCREENS = List.of(
+            StellaKitEditorScreen.class, StellaSettingsScreen.class,
+            StellaClientSettingsScreen.class, HudEditorScreen.class);
+
     private static void openMenu(Minecraft client) {
-        if (client.screen instanceof StellaScreen) return;
-        client.setScreen(new StellaScreen());
+        for (var cls : STELLA_SCREENS) {
+            if (cls.isInstance(client.screen)) return;
+        }
+        client.setScreen(new StellaKitEditorScreen(client.screen));
     }
 }

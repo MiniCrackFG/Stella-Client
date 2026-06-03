@@ -3,7 +3,19 @@
     "minVersion": "0.8",
     "package": "com.stella.client.mixin",
     "compatibilityLevel": "JAVA_21",
-    "client": [],
+    "client": [
+        "GameRendererMixin",
+        "MinecraftAccessor",
+        "CameraMixin",
+        "EntityMixin",
+        "TitleScreenMixin",
+        "ScreenMixin",
+        "ScreenAccessor",
+        "AbstractButtonMixin",
+        "CrosshairMixin",
+        "FastPlaceMixin",
+        "MotionBlurMixin"
+    ],
     "injectors": {
         "defaultRequire": 1
     }

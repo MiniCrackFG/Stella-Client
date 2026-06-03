@@ -1,0 +1,76 @@
+{
+    "targets": {
+        "swap": {},
+        "accum": { "persistent": true }
+    },
+    "passes": [
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "stella:post/frame_accum",
+            "inputs": [
+                {
+                    "sampler_name": "CurrentFrame",
+                    "target": "minecraft:main",
+                    "bilinear": true
+                },
+                {
+                    "sampler_name": "AccumPrev",
+                    "target": "accum",
+                    "bilinear": false
+                }
+            ],
+            "output": "swap",
+            "uniforms": {
+                "MotionBlurConfig": [
+                    {
+                        "name": "BlendFactor",
+                        "type": "float",
+                        "value": 0.85
+                    }
+                ]
+            }
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "minecraft:post/blit",
+            "inputs": [
+                {
+                    "sampler_name": "In",
+                    "target": "swap",
+                    "bilinear": true
+                }
+            ],
+            "uniforms": {
+                "BlitConfig": [
+                    {
+                        "name": "ColorModulate",
+                        "type": "vec4",
+                        "value": [ 1.0, 1.0, 1.0, 1.0 ]
+                    }
+                ]
+            },
+            "output": "minecraft:main"
+        },
+        {
+            "vertex_shader": "minecraft:core/screenquad",
+            "fragment_shader": "minecraft:post/blit",
+            "inputs": [
+                {
+                    "sampler_name": "In",
+                    "target": "swap",
+                    "bilinear": false
+                }
+            ],
+            "uniforms": {
+                "BlitConfig": [
+                    {
+                        "name": "ColorModulate",
+                        "type": "vec4",
+                        "value": [ 1.0, 1.0, 1.0, 1.0 ]
+                    }
+                ]
+            },
+            "output": "accum"
+        }
+    ]
+}
