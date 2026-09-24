@@ -1,15 +1,17 @@
 import logging
+import shutil
 import subprocess
 import minecraft_launcher_lib
 import os
 
+from launcher import paths
 from launcher.storage import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = os.path.expanduser("~/.stellaclient/config.json")
-AUTH_FILE = os.path.expanduser("~/.stellaclient/auth.json")
-MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
+CONFIG_FILE = paths.config_file()
+AUTH_FILE = paths.auth_file()
+MINECRAFT_DIR = paths.data_dir()
 
 MICROSOFT_CLIENT_ID = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"
 
@@ -26,6 +28,30 @@ def expand_path(value):
     if not isinstance(value, str) or not value.strip():
         return ""
     return os.path.abspath(os.path.expanduser(os.path.expandvars(value.strip())))
+
+
+def java_for_launch(java_path):
+    """El ejecutable de Java que conviene lanzar, según el sistema.
+
+    En Windows se prefiere `javaw.exe`, que es el mismo Java sin ventana de
+    consola y vive siempre junto a `java.exe`. Como el launcher va sin consola
+    propia, arrancar `java.exe` deja al juego escribiendo en una consola que no
+    existe. Los paquetes de Linux no traen ese binario, así que allí no hay nada
+    que cambiar.
+    """
+    if not java_path:
+        return java_path
+    if java_path.startswith("~"):
+        java_path = os.path.expanduser(java_path)
+    if not paths.is_windows():
+        return java_path
+    if os.path.basename(java_path).lower() not in ("java", "java.exe"):
+        return java_path
+    directory = os.path.dirname(java_path)
+    candidate = os.path.join(directory, "javaw.exe") if directory else "javaw"
+    # `shutil.which` vale para los dos casos: una ruta con carpeta se comprueba
+    # tal cual, y un nombre suelto se busca en el PATH.
+    return candidate if shutil.which(candidate) else java_path
 
 
 def load_settings():
@@ -234,9 +260,7 @@ def launch_minecraft(callback=None):
     settings = load_settings()
     version = settings.get("version", "1.21.11")
     ram = settings.get("ram", 4)
-    java_path = settings.get("java_path") or "java"
-    if java_path.startswith("~"):
-        java_path = os.path.expanduser(java_path)
+    java_path = java_for_launch(settings.get("java_path") or "java")
     ram_argument = f"-Xmx{ram}G"
     game_dir = game_dir_for(settings)
 

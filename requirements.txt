@@ -3,4 +3,7 @@ minecraft-launcher-lib>=8.0
 Pillow>=12.0
 requests>=2.31
 pypresence>=4.6
-PyGObject>=3.48
+# PyGObject no publica ruedas en PyPI para Windows y allí tampoco se usa: la
+# ventana la dibuja el motor de Edge y no GTK. Sin esta marca, `pip install -r
+# requirements.txt` falla en Windows en vez de instalar lo demás.
+PyGObject>=3.48; sys_platform == "linux"

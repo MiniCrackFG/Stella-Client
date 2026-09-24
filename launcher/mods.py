@@ -8,19 +8,20 @@ import subprocess
 import threading
 from pathlib import Path
 
+from launcher import paths
 from launcher.storage import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
-MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
-MODS_DIR = Path(MINECRAFT_DIR) / "mods"
+MINECRAFT_DIR = paths.data_dir()
+MODS_DIR = Path(paths.mods_dir())
 _install_lock = threading.Lock()
 
 # Registros de versiones anteriores. Se adoptan solo la primera vez que una
 # instancia no tiene todavía el suyo, para no perder lo ya instalado.
 LEGACY_REGISTRY_FILES = (
     Path(MINECRAFT_DIR) / "installed_mods.json",
-    Path(MINECRAFT_DIR) / "instances" / "installed_mods.json",
+    Path(paths.instances_dir()) / "installed_mods.json",
 )
 
 # Carpeta real de cada tipo de proyecto de Modrinth
@@ -438,7 +439,7 @@ FABRIC_API_MODRINTH_ID = "P7dR8mSH"
 
 
 def _get_instance_mods_dir():
-    settings_path = os.path.expanduser("~/.stellaclient/config.json")
+    settings_path = paths.config_file()
     if not os.path.exists(settings_path):
         return None
     try:
@@ -447,7 +448,7 @@ def _get_instance_mods_dir():
         iid = settings.get("current_instance")
         if not iid:
             return None
-        instances_path = os.path.expanduser("~/.stellaclient/instances/instances.json")
+        instances_path = paths.instances_file()
         if not os.path.exists(instances_path):
             return None
         with open(instances_path) as f:
@@ -472,7 +473,7 @@ def install_stella_mod(force=False):
     dest = mods_dir / STELLA_JAR_NAME
 
     try:
-        settings = load_json(os.path.expanduser("~/.stellaclient/config.json"), {})
+        settings = load_json(paths.config_file(), {})
         _ensure_fabric_api_in(mods_dir, settings.get("version", "1.21.11"))
     except Exception as e:
         logger.info(f"Could not prepare Fabric API: {e}")

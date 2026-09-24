@@ -10,19 +10,32 @@ import launcher.instances as instances
 import launcher.minecraft as minecraft
 import launcher.mods as mods
 import launcher.discord_rpc as discord_rpc
+from launcher import paths
 
 logger = logging.getLogger(__name__)
 
 
 def _open_url(url):
+    """Abre una URL en el navegador del sistema."""
     try:
-        subprocess.Popen(['xdg-open', url])
+        if paths.is_windows():
+            os.startfile(url)  # sólo existe en Windows
+        else:
+            subprocess.Popen(['xdg-open', url])
     except Exception:
         import webbrowser
         webbrowser.open(url)
 
 
 def _ensure_glib():
+    """GLib de GTK, o None si esta plataforma no lo usa.
+
+    En Windows la ventana la dibuja WebView2 y no hay GTK que buscar: se sale
+    antes de intentarlo, para no ensuciar `sys.path` con rutas que allí no
+    existen.
+    """
+    if paths.is_windows():
+        return None
     try:
         import gi
         gi.require_version("Gtk", "3.0")
@@ -45,6 +58,69 @@ def _ensure_glib():
             except (ImportError, ValueError):
                 continue
     return None
+
+def _copy_to_clipboard_gtk(text):
+    """Portapapeles en Linux: GTK, encolando en el hilo principal si hace falta."""
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, GLib, Gtk
+    except Exception as e:
+        logger.info(f"copy_to_clipboard sin GTK disponible: {e}")
+        return False
+
+    def _do_copy():
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(text, -1)
+        # Sin store() el contenido se pierde al cerrar la app.
+        clipboard.store()
+
+    try:
+        # En el hilo principal GTK es seguro y podemos devolver el resultado
+        # real. Si pywebview llama desde otro hilo, se encola en el principal.
+        if GLib.MainContext.default().is_owner():
+            _do_copy()
+            return True
+
+        def _idle_copy():
+            try:
+                _do_copy()
+            except Exception as e:
+                logger.info(f"copy_to_clipboard falló: {e}")
+            return False  # no repetir
+
+        GLib.idle_add(_idle_copy)
+        return True
+    except Exception as e:
+        logger.info(f"copy_to_clipboard falló: {e}")
+        return False
+
+
+def _copy_to_clipboard_windows(text):
+    """Portapapeles en Windows: `clip.exe` con el texto en UTF-16LE.
+
+    `clip` viene con el propio sistema, y dándoselo en UTF-16LE no se rompen los
+    acentos ni los emoji —que es justo lo que pasa si se le pasa la codificación
+    de la consola—. El único detalle es `CREATE_NO_WINDOW`: sin él, el intérprete
+    de consola de `clip` asomaría una ventana negra un instante de nada.
+    """
+    try:
+        completed = subprocess.run(
+            ["clip"],
+            input=text.encode("utf-16-le"),
+            timeout=10,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode == 0:
+            return True
+        logger.info(f"clip devolvió el código {completed.returncode}")
+        return False
+    except Exception as e:
+        logger.info(f"copy_to_clipboard en Windows falló: {e}")
+        return False
+
 
 _cache = {}
 _CACHE_TTL = 60
@@ -206,6 +282,7 @@ class API:
         return None
 
     def detect_java(self):
+        """Java que hay en el sistema, para poder elegirlo en Ajustes."""
         javas = []
         seen = set()
 
@@ -221,20 +298,55 @@ class API:
             except Exception:
                 pass
 
+        for candidate in self._java_candidates():
+            add_java(candidate)
+        return javas
+
+    def _java_candidates(self):
+        """Rutas donde puede haber un Java, en orden de preferencia.
+
+        Cada sistema los pone en un sitio: en Linux van los paquetes a
+        `/usr/lib/jvm` y en Windows a `Program Files`, con instalaciones que
+        meten además una carpeta por versión. `add_java` ya descarta lo que no
+        exista, así que aquí se puede ser generoso listando.
+        """
+        import glob
+
+        if paths.is_windows():
+            program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+            program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+            roots = [
+                os.environ.get("JAVA_HOME"),
+                os.path.join(program_files, "Java"),
+                os.path.join(program_files, "Eclipse Adoptium"),
+                os.path.join(program_files, "Microsoft"),
+                os.path.join(program_files, "Zulu"),
+                os.path.join(program_files, "BellSoft"),
+                os.path.join(program_files, "Amazon Corretto"),
+                os.path.join(program_files_x86, "Java"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
+            ]
+            candidates = []
+            for root in roots:
+                if not root:
+                    continue
+                candidates.append(os.path.join(root, "bin", "java.exe"))
+                for sub in sorted(glob.glob(os.path.join(root, "*")), reverse=True):
+                    candidates.append(os.path.join(sub, "bin", "java.exe"))
+            return candidates
+
+        candidates = []
         for cmd in ["java", "java21", "java17"]:
             try:
                 r = subprocess.run(["which", cmd], capture_output=True, text=True, timeout=5)
                 if r.returncode == 0:
-                    add_java(r.stdout.strip())
+                    candidates.append(r.stdout.strip())
             except Exception:
                 pass
-
-        import glob
         for jdir in sorted(glob.glob("/usr/lib/jvm/*"), reverse=True):
-            add_java(os.path.join(jdir, "bin/java"))
-            add_java(os.path.join(jdir, "jre/bin/java"))
-
-        return javas
+            candidates.append(os.path.join(jdir, "bin/java"))
+            candidates.append(os.path.join(jdir, "jre/bin/java"))
+        return candidates
 
     def get_avatar(self, uuid=None):
         import requests
@@ -372,7 +484,7 @@ class API:
                     settings["version"] = instance.get("version", settings.get("version", "1.21.11"))
                     settings["ram"] = instance.get("ram", settings.get("ram", 4))
                     settings["java_path"] = instance.get("java_path", settings.get("java_path", "java"))
-                    settings["minecraft_dir"] = instance.get("minecraft_dir", settings.get("minecraft_dir", os.path.expanduser("~/.stellaclient")))
+                    settings["minecraft_dir"] = instance.get("minecraft_dir", settings.get("minecraft_dir", paths.data_dir()))
                     minecraft.save_settings(settings)
                     inst_mods = instance.get("mods_dir")
                     if inst_mods:
@@ -513,47 +625,16 @@ class API:
     def copy_to_clipboard(self, text):
         """Copia texto al portapapeles del sistema.
 
-        WebKitGTK no siempre permite el portapapeles desde JS (necesita permisos
-        que pywebview no pide), así que el camino fiable es GTK. Si la llamada
-        llega desde otro hilo se encola en el principal con `idle_add`, que es el
-        único donde GTK es seguro.
+        El navegador no siempre puede hacerlo por su cuenta —WebKitGTK necesita
+        unos permisos que pywebview no pide—, así que el camino fiable es la vía
+        nativa de cada sistema. En `ui/app.js` queda además el intento por
+        `navigator.clipboard`, que es a lo que se recurre si esto devuelve False.
         """
         if not isinstance(text, str) or not text:
             return False
-        try:
-            import gi
-            gi.require_version("Gtk", "3.0")
-            gi.require_version("Gdk", "3.0")
-            from gi.repository import Gdk, GLib, Gtk
-        except Exception as e:
-            logger.info(f"copy_to_clipboard sin GTK disponible: {e}")
-            return False
-
-        def _do_copy():
-            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(text, -1)
-            # Sin store() el contenido se pierde al cerrar la app.
-            clipboard.store()
-
-        try:
-            # En el hilo principal GTK es seguro y podemos devolver el resultado
-            # real. Si pywebview llama desde otro hilo, se encola en el principal.
-            if GLib.MainContext.default().is_owner():
-                _do_copy()
-                return True
-
-            def _idle_copy():
-                try:
-                    _do_copy()
-                except Exception as e:
-                    logger.info(f"copy_to_clipboard falló: {e}")
-                return False  # no repetir
-
-            GLib.idle_add(_idle_copy)
-            return True
-        except Exception as e:
-            logger.info(f"copy_to_clipboard falló: {e}")
-            return False
+        if paths.is_windows():
+            return _copy_to_clipboard_windows(text)
+        return _copy_to_clipboard_gtk(text)
 
     def close_window(self):
         if hasattr(self, '_window'):
@@ -561,8 +642,20 @@ class API:
         return {"ok": True}
 
     def begin_window_move(self, button, root_x, root_y, timestamp):
+        """Arrastra la ventana sin bordes desde la barra de título propia.
+
+        Cada sistema tiene su forma de ceder el arrastre al gestor de ventanas, y
+        en los dos casos se delega en él a propósito: mover la ventana desde
+        Python obligaría a un viaje de ida y vuelta por cada movimiento del ratón
+        —navegador, puente, Python, ventana— y el arrastre se ve a tirones.
+        """
         if not hasattr(self, '_window') or not self._window:
             return {"ok": False}
+        if paths.is_windows():
+            return self._begin_window_move_windows()
+        return self._begin_window_move_gtk(button, root_x, root_y, timestamp)
+
+    def _begin_window_move_gtk(self, button, root_x, root_y, timestamp):
         glib = _ensure_glib()
         if not glib:
             return {"ok": False}
@@ -573,6 +666,42 @@ class API:
         except Exception:
             pass
         return {"ok": True}
+
+    def _begin_window_move_windows(self):
+        """Entrega el arrastre al gestor de ventanas de Windows.
+
+        `ReleaseCapture` más `WM_NCLBUTTONDOWN` sobre la barra de título es el
+        equivalente de `begin_move_drag` en GTK: el sistema entra en su propio
+        bucle de movimiento y no vuelve a cruzar nada por el puente hasta que se
+        suelta el botón.
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            native = getattr(self._window, "native", None)
+            if native is None:
+                return {"ok": False}
+            handle = native.Handle.ToInt64()
+            if not handle:
+                return {"ok": False}
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.ReleaseCapture.argtypes = []
+            user32.SendMessageW.argtypes = [
+                wintypes.HWND,
+                wintypes.UINT,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            ]
+            user32.SendMessageW.restype = wintypes.LPARAM
+
+            user32.ReleaseCapture()
+            user32.SendMessageW(wintypes.HWND(handle), 0x00A1, 2, 0)  # WM_NCLBUTTONDOWN, HTCAPTION
+            return {"ok": True}
+        except Exception as e:
+            logger.info(f"begin_window_move en Windows falló: {e}")
+            return {"ok": False}
 
     def _ensure_mods_env(self):
         os.environ.pop("STELLA_MODS_DIR", None)

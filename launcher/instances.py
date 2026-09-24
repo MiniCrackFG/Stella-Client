@@ -3,13 +3,14 @@ import os
 import shutil
 
 import launcher.minecraft as minecraft
+from launcher import paths
 from launcher.storage import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = os.path.expanduser("~/.stellaclient")
-INSTANCES_DIR = os.path.join(BASE_DIR, "instances")
-INSTANCES_FILE = os.path.join(INSTANCES_DIR, "instances.json")
+BASE_DIR = paths.data_dir()
+INSTANCES_DIR = paths.instances_dir()
+INSTANCES_FILE = paths.instances_file()
 
 
 def _ensure():
@@ -180,7 +181,7 @@ def ensure_default_instance():
             minecraft.save_settings(settings)
             return inst
     # Create it
-    default_mods = os.path.join(os.path.expanduser("~/.stellaclient"), "mods")
+    default_mods = paths.mods_dir()
     instance_dir = os.path.join(INSTANCES_DIR, "default")
     mods_dir = os.path.join(instance_dir, "mods")
     os.makedirs(mods_dir, exist_ok=True)

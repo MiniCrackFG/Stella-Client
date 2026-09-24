@@ -85,5 +85,21 @@ Hace falta, además de las herramientas habituales:
 
 Cada build imprime una auditoría del payload (`packaging/audit_libs.py`) que comprueba dos cosas: que no se haya colado ninguna librería gráfica dentro, y qué librerías de fuera hacen falta de verdad. De ahí salen, medidas y no escritas a mano, las dependencias del `.deb` y del `.rpm`.
 
+# Compilar para Windows
+
+El `.exe` **no se puede construir desde Linux**: PyInstaller no cross-compila, así que el empaquetado tiene que ejecutarse en Windows. Hay dos maneras, y las dos acaban en el mismo sitio.
+
+**En una máquina Windows** (los pasos completos, con lo que hay que instalar y cómo comprobarlo, están en [`BUILD-WINDOWS.md`](BUILD-WINDOWS.md)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+Sale `dist\packages\StellaClient-Setup-<versión>.exe` y un ZIP portátil. Hacen falta Python 3.13 —`pythonnet`, del que depende pywebview en Windows, todavía no soporta la 3.14— e Inno Setup 6.3 o superior.
+
+**Sin salir de Linux**, subiendo el código a GitHub: el workflow `.github/workflows/windows.yml` compila en una máquina Windows de GitHub, comprueba el resultado y deja el instalador como artefacto descargable. Se lanza desde la pestaña *Actions* o publicando una etiqueta `v*`, que además crea la release con los ficheros adjuntos.
+
+La diferencia con Linux no es sólo de formato: allí la ventana la dibujan GTK y WebKitGTK, que pone la distro, y aquí el motor de Edge, que ya viene con Windows. Por eso el payload de Windows no lleva pila gráfica que empaquetar ni dependencias de sistema que declarar, y por eso no hay auditoría de librerías: no hay nada que auditar.
+
 ## 📄 Licencia
 Este proyecto está bajo la licencia MIT.

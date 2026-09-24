@@ -1,8 +1,51 @@
 import logging
+import logging.handlers
 import os
 import sys
 import threading
 import time
+
+import launcher.paths as paths
+
+
+def _setup_logging():
+    """Deja el registro también en un fichero cuando no hay consola donde escribirlo.
+
+    El ejecutable de Windows va sin consola —una ventana de consola aparecería
+    detrás del launcher—, así que `sys.stderr` es None y un registro sólo a
+    consola se perdería entero. Ese fichero es lo único que queda después para
+    leer qué falló en una máquina donde no hay terminal.
+    """
+    handlers = []
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler(sys.stderr))
+
+    log_file_error = None
+    if paths.is_windows():
+        try:
+            os.makedirs(paths.logs_dir(), exist_ok=True)
+            handlers.append(
+                logging.handlers.RotatingFileHandler(
+                    os.path.join(paths.logs_dir(), "stella.log"),
+                    maxBytes=1_000_000,
+                    backupCount=3,
+                    encoding="utf-8",
+                )
+            )
+        except OSError as e:
+            log_file_error = e  # sin sitio para el registro, pero se arranca igual
+
+    if not handlers:
+        handlers = [logging.NullHandler()]
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+    )
+    if log_file_error is not None:
+        logging.warning(f"No se pudo escribir el registro en fichero: {log_file_error}")
 
 
 def _drop_bundled_gui_paths():
@@ -15,6 +58,8 @@ def _drop_bundled_gui_paths():
     se compiló—, y esas variables dejarían al programa buscando en directorios que
     el paquete no lleva.
     """
+    if not sys.platform.startswith("linux"):
+        return  # en Windows y macOS la pila gráfica no sale de aquí
     bundle = getattr(sys, "_MEIPASS", None)
     if not bundle:
         return  # sin congelar no hay nada que deshacer
@@ -64,15 +109,11 @@ import launcher.minecraft as minecraft
 from api import API
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+_setup_logging()
 
 
 def ensure_dirs():
-    base = os.path.expanduser("~/.stellaclient")
+    base = paths.data_dir()
     for d in ["", "mods", "forge", "logs", "crash-reports", "versions", "instances"]:
         os.makedirs(os.path.join(base, d), exist_ok=True)
 
@@ -88,6 +129,13 @@ def _find_asset(name):
 
 
 def _set_default_icon():
+    """Icono por defecto de las ventanas GTK.
+
+    En Windows no hay nada que fijar en tiempo de ejecución: el icono va como
+    recurso dentro del propio `.exe` y la barra de tareas lo toma de ahí.
+    """
+    if paths.is_windows():
+        return
     icon_path = _find_asset("icon-256.png")
     if not icon_path:
         return
@@ -102,6 +150,9 @@ def _set_default_icon():
 
 
 def set_window_icon(window):
+    """Icono de esta ventana concreta. Para Windows, ver `_set_default_icon`."""
+    if paths.is_windows():
+        return
     icon_path = _find_asset("icon-256.png")
     if not icon_path:
         return
@@ -126,6 +177,9 @@ def set_window_icon(window):
 
 
 def start_ui():
+    # Antes que nada: si los datos vienen de la ruta antigua se trasladan, y así
+    # cualquier lectura posterior ya los encuentra donde toca.
+    paths.migrate_once()
     ensure_dirs()
     instances.ensure_default_instance()
     settings = minecraft.load_settings()
@@ -137,8 +191,15 @@ def start_ui():
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
 
     if not settings.get("hw_accel", True):
-        os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
-        os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+        if paths.is_windows():
+            # WebView2 acepta argumentos de Chromium por esta variable: es el
+            # equivalente en Windows de lo que abajo se hace por WebKitGTK.
+            os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+                "--disable-gpu --disable-gpu-compositing"
+            )
+        else:
+            os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+            os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
     _set_default_icon()
 
@@ -172,6 +233,14 @@ _DISPLAY_VARS = ("DISPLAY", "WAYLAND_DISPLAY")
 # Librerías gráficas cuyo origen conviene poder citar al verificar un paquete.
 _CHECK_LIBS = ("libgtk-3", "libwebkit2gtk", "libglib-2.0", "libgirepository-")
 
+# Con qué se identifica el runtime de WebView2 en el registro de Windows. Hay
+# dos rutas porque una instalación de 64 bits aparece en la vista de 32 bits.
+_WEBVIEW2_CLIENT = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+_WEBVIEW2_REG_KEYS = (
+    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients",
+    r"SOFTWARE\Microsoft\EdgeUpdate\Clients",
+)
+
 
 def _loaded_library_paths(prefixes):
     """Rutas de las librerías realmente cargadas, leídas de `/proc/self/maps`."""
@@ -194,17 +263,31 @@ def _loaded_library_paths(prefixes):
 def check_environment():
     """Comprueba que el binario puede arrancar en este sistema y devuelve el código de salida.
 
-    Existe para poder verificar los paquetes en otras distros sin pantalla: carga los
-    typelibs de GTK y WebKitGTK, informa de dónde sale cada librería —el diseño del
-    paquete es que las ponga la distro, así que verlas dentro del bundle sería un aviso—
-    y, si hay pantalla, llega a crear y cerrar la ventana de verdad.
+    Existe para poder verificar los paquetes sin pantalla: carga la pila gráfica
+    de verdad, informa de dónde sale cada pieza —el diseño del paquete es que la
+    ponga el sistema, así que verla dentro del bundle sería un aviso— y, si hay
+    sesión gráfica, llega a crear y cerrar la ventana.
+
+    La pila es distinta en cada sistema —GTK y WebKitGTK en Linux, el motor de
+    Edge sobre .NET en Windows—, así que cada uno tiene su comprobación.
     """
-    bundle = getattr(sys, "_MEIPASS", "") or ""
     print("stella-client — comprobación del entorno")
     print(f"  ejecutable : {sys.executable}")
     print(f"  python     : {sys.version.split()[0]}")
+    print(f"  sistema    : {sys.platform}")
+    print(f"  datos      : {paths.data_dir()}")
+    bundle = getattr(sys, "_MEIPASS", "") or ""
     if bundle:
         print(f"  bundle     : {bundle}")
+
+    if paths.is_windows():
+        return _check_windows()
+    return _check_gtk()
+
+
+def _check_gtk():
+    """Comprobación en Linux: typelibs de GTK y WebKitGTK del sistema."""
+    bundle = getattr(sys, "_MEIPASS", "") or ""
 
     try:
         import gi
@@ -244,7 +327,68 @@ def check_environment():
         return 0
 
     print(f"  pantalla   : {display[0]}={display[1]}")
-    # Si WebKit se cuelga, el vigilante lo convierte en un código de salida claro
+    return _check_window()
+
+
+def _check_windows():
+    """Comprobación en Windows: motor de Edge (WebView2) y el puente con .NET."""
+    problems = []
+
+    webview2 = _webview2_version()
+    print(f"  WebView2   : {webview2 or 'NO ENCONTRADO'}")
+    if not webview2:
+        problems.append(
+            "falta el runtime de WebView2; llega con Microsoft Edge o con su instalador propio"
+        )
+
+    try:
+        import clr  # noqa: F401  (el puente con .NET que pywebview usa aquí)
+
+        print("  pythonnet  : disponible")
+    except Exception as e:
+        problems.append(f"pythonnet no carga: {e}")
+
+    if problems:
+        for problem in problems:
+            print(f"  FALLO      : {problem}")
+        print("RESULTADO: este sistema no tiene lo necesario para arrancar")
+        return 1
+
+    if not os.environ.get("SESSIONNAME"):
+        # Sin sesión interactiva no hay escritorio donde abrir una ventana: es lo
+        # que pasa en un servidor de integración continua. Ahí crear la ventana
+        # no puede ser condición para publicar el paquete.
+        print("  pantalla   : sesión no interactiva; no se crea la ventana")
+        print("RESULTADO: la pila gráfica carga correctamente")
+        return 0
+
+    return _check_window()
+
+
+def _webview2_version():
+    """Versión del runtime de WebView2 según el registro, o None si no está.
+
+    pywebview dibuja con el motor de Edge en Windows, así que sin este runtime la
+    ventana no se crea. Comprobarlo aquí da un mensaje claro en vez del volcado de
+    error que suelta el puente con .NET cuando no lo encuentra.
+    """
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for key in _WEBVIEW2_REG_KEYS:
+            try:
+                with winreg.OpenKey(root, key + "\\" + _WEBVIEW2_CLIENT) as handle:
+                    return winreg.QueryValueEx(handle, "pv")[0]
+            except OSError:
+                continue
+    return None
+
+
+def _check_window():
+    """Crea y cierra una ventana de verdad. Devuelve el código de salida."""
+    # Si la web se cuelga, el vigilante lo convierte en un código de salida claro
     # en vez de dejar el proceso vivo para siempre.
     watchdog = threading.Timer(60, os._exit, [124])
     watchdog.daemon = True
@@ -261,7 +405,7 @@ def check_environment():
         webview.start(debug=False, func=_close_after_start)
     except Exception as e:
         print(f"  FALLO al crear la ventana: {e}")
-        print("RESULTADO: GTK carga pero la ventana no se pudo abrir")
+        print("RESULTADO: la pila gráfica carga pero la ventana no se pudo abrir")
         return 1
     finally:
         watchdog.cancel()
@@ -271,6 +415,8 @@ def check_environment():
 
 
 if __name__ == "__main__":
-    if "--check" in sys.argv[1:]:
+    # El paquete de Windows trae un segundo ejecutable con consola para esto, y se
+    # reconoce por su nombre: así se puede hacer doble clic sin pasar argumentos.
+    if "--check" in sys.argv[1:] or os.path.basename(sys.executable).startswith("stella-client-check"):
         sys.exit(check_environment())
     start_ui()

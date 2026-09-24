@@ -1,0 +1,19 @@
+# Dependencias del payload de Windows.
+#
+# No se reutiliza `requirements-build.txt` porque aquel añade `pycairo` y arrastra
+# PyGObject: en Windows ninguna de las dos tiene rueda en PyPI —necesitan las
+# cabeceras de GTK— y ninguna de las dos hace falta, porque allí pywebview dibuja
+# con el motor de Edge en lugar de con GTK.
+#
+# Sí se reutiliza `../requirements.txt`, que es la lista de dependencias de verdad:
+# su PyGObject va marcado con `sys_platform == "linux"`, así que en Windows se
+# ignora en lugar de romper la instalación.
+#
+# `pythonnet` tampoco se pone aquí a propósito: pywebview lo declara para Windows
+# (`pythonnet; sys_platform == "win32"`), así que llega solo. Se fija una versión
+# mínima porque las anteriores a la 3.0.5 no soportan Python 3.13, que es el que se
+# usa para compilar aquí.
+
+-r ../requirements.txt
+pythonnet>=3.0.5
+pyinstaller>=6.22
