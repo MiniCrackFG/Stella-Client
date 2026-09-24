@@ -1,52 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""Receta retirada.
 
-a = Analysis(
-    ['main.py'],
-    pathex=[],
-    binaries=[],
-    datas=[('ui', 'ui'), ('launcher', 'launcher'), ('assets', 'assets')],
-    hiddenimports=[
-        'optparse',
-        'gi',
-        'gi.repository.GLib',
-        'gi.repository.GObject',
-        'gi.repository.GdkPixbuf',
-        'gi.repository.Gtk',
-        'gi.repository.Gio',
-        'gi.repository.WebKit2',
-        'gi.repository.JavaScriptCore',
-        'gi.repository.Pango',
-        'gi.repository.PangoCairo',
-        'gi.repository.cairo',
-        'gi.repository.HarfBuzz',
-    ],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
-)
-pyz = PYZ(a.pure)
+La de PyInstaller vive ahora en `packaging/stella-client.spec`, y la usan tanto
+`./build.sh payload` como los tres empaquetadores (.deb, .rpm y AppImage), que
+envuelven el mismo payload.
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='stella-client',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon='/home/ivan/Proyectos/stella-client/assets/icon-256.png',
-)
+Se retiró por un motivo concreto: este fichero está en `.gitignore` (`*.spec`),
+así que era imposible versionarlo, y tener una segunda receta viva al lado de la
+buena es una forma segura de que alguien construya un binario distinto sin
+enterarse. La ruta relativa del icono que se arregló aquí está incorporada en la
+receta nueva.
+
+Se deja el fichero para que quien ejecute `pyinstaller main.spec` por costumbre
+reciba esta explicación en vez de un binario con una receta vieja.
+"""
+
+raise SystemExit(__doc__)

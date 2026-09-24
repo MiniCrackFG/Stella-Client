@@ -1,57 +1,17 @@
 #!/bin/bash
-set -e
+# Este script está retirado: la receta del .deb vive ahora en packaging/deb.sh,
+# junto a la del .rpm y la del AppImage, y se gobierna desde ./build.sh
+#
+# Antes eran dos recetas distintas (esta y main.spec) que podían divergir sin que
+# nadie se enterara: de hecho esta fijaba a mano `Depends:` mientras el spec lo
+# hacía a su manera. Ahora las dependencias de los dos formatos salen de la misma
+# auditoría medida sobre el payload (build/depends-deb.txt y build/requires-rpm.txt).
+#
+# Se conserva como aviso para que quien lo llame por costumbre acabe en el sitio
+# bueno en vez de en un error.
+set -euo pipefail
 
-NAME="stella-client"
-VERSION="0.1.0"
-ARCH="amd64"
-ROOT="/tmp/${NAME}-debroot"
-
-rm -rf "$ROOT"
-mkdir -p "$ROOT/DEBIAN"
-mkdir -p "$ROOT/usr/bin"
-mkdir -p "$ROOT/usr/share/applications"
-mkdir -p "$ROOT/usr/share/icons/hicolor/64x64/apps"
-mkdir -p "$ROOT/usr/share/icons/hicolor/128x128/apps"
-mkdir -p "$ROOT/usr/share/icons/hicolor/256x256/apps"
-mkdir -p "$ROOT/usr/share/${NAME}"
-
-echo "Package: ${NAME}
-Version: ${VERSION}
-Section: games
-Priority: optional
-Architecture: ${ARCH}
-Depends: libgtk-3-0, libwebkit2gtk-4.1-0, libjavascriptcoregtk-4.1-0, libgirepository1.0-dev, gobject-introspection, gir1.2-gtk-3.0
-Maintainer: Ivan <ivan@stellaclient.dev>
-Description: Stella Client - Minecraft Launcher
- A modern Minecraft launcher with Fabric mod support,
- Discord Rich Presence, and Microsoft account authentication." > "$ROOT/DEBIAN/control"
-
-# Copy the PyInstaller binary
-cp "dist/${NAME}" "$ROOT/usr/bin/${NAME}"
-
-# Write proper desktop file
-echo "[Desktop Entry]
-Name=Stella Client
-Comment=Minecraft Launcher
-Exec=${NAME}
-Icon=${NAME}
-Terminal=false
-Type=Application
-Categories=Game;Utility;
-StartupNotify=true" > "$ROOT/usr/share/applications/${NAME}.desktop"
-
-# Copy icons
-cp assets/icon-64.png "$ROOT/usr/share/icons/hicolor/64x64/apps/${NAME}.png"
-cp assets/icon-128.png "$ROOT/usr/share/icons/hicolor/128x128/apps/${NAME}.png"
-cp assets/icon-256.png "$ROOT/usr/share/icons/hicolor/256x256/apps/${NAME}.png"
-
-# Copy jar if exists
-if [ -f "dist/${NAME}.jar" ]; then
-    cp "dist/${NAME}.jar" "$ROOT/usr/share/${NAME}/${NAME}.jar"
-fi
-
-# Build .deb
-dpkg-deb --build "$ROOT" "dist/${NAME}_${VERSION}_${ARCH}.deb"
-
-rm -rf "$ROOT"
-echo "Built dist/${NAME}_${VERSION}_${ARCH}.deb"
+echo "build-deb.sh está retirado. Usa:" >&2
+echo "  ./build.sh deb        # el .deb" >&2
+echo "  ./build.sh            # payload + .deb + .rpm + AppImage" >&2
+exit 1

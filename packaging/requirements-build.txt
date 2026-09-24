@@ -1,0 +1,15 @@
+# Dependencias del entorno de build del payload.
+#
+# No se instalan en el `.venv` de desarrollo sino en un entorno aparte montado
+# sobre un Python portátil. El motivo es concreto: los módulos del intérprete de
+# Arch se compilan contra su glibc, y su `math` pide `GLIBC_2.44`, así que el
+# binario resultante sólo arrancaría en Arch y derivados. El Python de
+# python-build-standalone se compila contra glibc 2.17.
+#
+# `pycairo` no está en requirements.txt pero hace falta: sin él, PyGObject no
+# construye `gi/_gi_cairo`, que es lo que expone `gi.repository.cairo`.
+
+# pip resuelve los `-r` anidados respecto a este fichero, no al directorio actual.
+-r ../requirements.txt
+pycairo>=1.29
+pyinstaller>=6.22

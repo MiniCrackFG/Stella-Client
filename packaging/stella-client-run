@@ -1,0 +1,14 @@
+#!/bin/sh
+# Lanzador de Stella Client para las instalaciones nativas (.deb / .rpm).
+#
+# El payload es autocontenido en lo que respecta a Python; GTK y WebKitGTK los
+# pone la distro a propósito. Empaquetarlos congelaría su versión y la glibc de
+# la máquina donde se compiló, que es justo lo que dejaría el binario atado a
+# unas pocas distros.
+#
+# Se resuelve la ruta real del script porque /usr/bin/stella-client es un enlace
+# simbólico: así el exec encuentra su directorio desde cualquier directorio de
+# trabajo.
+set -e
+here=$(dirname "$(readlink -f "$0")")
+exec "$here/stella-client" "$@"

@@ -1,8 +1,11 @@
-import json
+import logging
 import os
 import shutil
 
 import launcher.minecraft as minecraft
+from launcher.storage import load_json, save_json
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.expanduser("~/.stellaclient")
 INSTANCES_DIR = os.path.join(BASE_DIR, "instances")
@@ -15,16 +18,57 @@ def _ensure():
 
 def _load():
     _ensure()
-    if not os.path.exists(INSTANCES_FILE):
+    data = load_json(INSTANCES_FILE, {})
+    if not isinstance(data, dict):
         return {}
-    with open(INSTANCES_FILE) as f:
-        return json.load(f)
+    # Descartamos entradas incompletas (JSON editado a mano o a medias)
+    clean = {k: v for k, v in data.items() if isinstance(v, dict) and v.get("id")}
+    # Dos instancias no pueden compartir carpeta de juego (al borrar una se
+    # llevaría por delante los archivos de la otra). Si alguna quedó apuntando a
+    # la carpeta de otra, se devuelve a la suya y se guarda la corrección.
+    if _repair_shared_dirs(clean):
+        _save(clean)
+    return clean
+
+
+def instance_dir_for(instance_id):
+    return os.path.join(INSTANCES_DIR, instance_id)
+
+
+def _repair_shared_dirs(data):
+    """Devuelve True si ha tenido que separar instancias que compartían carpeta."""
+    by_dir = {}
+    for iid, inst in data.items():
+        d = inst.get("minecraft_dir")
+        if d:
+            by_dir.setdefault(os.path.abspath(d), []).append(iid)
+    changed = False
+    for dir_path, ids in by_dir.items():
+        if len(ids) < 2:
+            continue
+        # La dueña de la carpeta es la instancia cuyo id coincide con el nombre
+        # de la carpeta; si ninguna coincide, se queda la primera.
+        owner = next((i for i in ids if os.path.basename(dir_path) == i), ids[0])
+        for iid in ids:
+            if iid == owner:
+                continue
+            own_dir = instance_dir_for(iid)
+            data[iid]["minecraft_dir"] = own_dir
+            data[iid]["mods_dir"] = os.path.join(own_dir, "mods")
+            try:
+                os.makedirs(data[iid]["mods_dir"], exist_ok=True)
+            except OSError:
+                pass
+            logger.warning(
+                f"La instancia '{iid}' apuntaba a {dir_path} (carpeta de '{owner}'); restaurada a {own_dir}"
+            )
+            changed = True
+    return changed
 
 
 def _save(data):
     _ensure()
-    with open(INSTANCES_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    save_json(INSTANCES_FILE, data)
 
 
 def list_instances():
@@ -66,11 +110,30 @@ def delete_instance(instance_id):
     data = _load()
     if instance_id not in data:
         return False
+
     instance_dir = data[instance_id].get("minecraft_dir")
     if instance_dir and os.path.exists(instance_dir):
         shutil.rmtree(instance_dir)
     del data[instance_id]
     _save(data)
+
+    # El entorno de mods apunta a la instancia borrada: se limpia siempre
+    env_dir = os.environ.get("STELLA_MODS_DIR")
+    if env_dir and instance_dir and os.path.abspath(env_dir).startswith(os.path.abspath(instance_dir)):
+        os.environ.pop("STELLA_MODS_DIR", None)
+
+    settings = minecraft.load_settings()
+    if settings.get("current_instance") == instance_id:
+        remaining = next(iter(data.values()), None)
+        if remaining:
+            settings["current_instance"] = remaining["id"]
+            minecraft.save_settings(settings)
+        else:
+            settings.pop("current_instance", None)
+            minecraft.save_settings(settings)
+            # Nunca dejamos la app sin ninguna instancia
+            ensure_default_instance()
+
     return True
 
 
@@ -78,6 +141,27 @@ def update_instance(instance_id, updates):
     data = _load()
     if instance_id not in data:
         return None
+    updates = dict(updates)
+    if updates.get("minecraft_dir"):
+        new_dir = minecraft.expand_path(updates["minecraft_dir"])
+        taken = next(
+            (i for i, inst in data.items()
+             if i != instance_id
+             and os.path.abspath(inst.get("minecraft_dir") or "") == os.path.abspath(new_dir)),
+            None,
+        )
+        if taken:
+            # Una instancia no puede adoptar la carpeta de otra: normalmente es
+            # un valor viejo de la UI que se cuela al guardar los ajustes.
+            logger.warning(
+                f"Se ignora minecraft_dir '{new_dir}' para '{instance_id}': pertenece a '{taken}'"
+            )
+            updates.pop("minecraft_dir", None)
+            updates.pop("mods_dir", None)
+        else:
+            updates["minecraft_dir"] = new_dir
+            # La carpeta de mods siempre cuelga del directorio del juego
+            updates["mods_dir"] = os.path.join(new_dir, "mods")
     data[instance_id].update(updates)
     _save(data)
     return data[instance_id]
@@ -108,12 +192,8 @@ def ensure_default_instance():
                     shutil.move(os.path.join(default_mods, f), os.path.join(mods_dir, f))
                 except Exception:
                     pass
-    old_reg = os.path.join(os.path.expanduser("~/.stellaclient"), "installed_mods.json")
-    if os.path.exists(old_reg):
-        try:
-            shutil.move(old_reg, os.path.join(instance_dir, "installed_mods.json"))
-        except Exception:
-            pass
+    # El registro de mods antiguo (global) ya no se mueve: mods.py lo lee como
+    # respaldo la primera vez que una instancia no tiene el suyo propio.
     instance = {
         "id": "default",
         "name": "Default",

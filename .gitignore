@@ -6,10 +6,16 @@ __pycache__/
 dist/
 build/
 *.spec
+# La receta de empaquetado sí se versiona: sin esta excepción, la build no es
+# reproducible desde un clon limpio.
+!packaging/*.spec
+.build-tools/
 
 # Virtual environments
 .venv/
 venv/
+# El entorno de build de Windows lo crea build.ps1
+.venv-win/
 
 # IDE
 .vscode/
@@ -21,6 +27,8 @@ Thumbs.db
 
 # Project specific
 *.deb
+*.rpm
+*.AppImage
 *.tar.gz
 *.jar
 *.pkg
@@ -28,6 +36,14 @@ Thumbs.db
 logs/
 .env
 .ruff_cache/
+# Instaladores y payloads de Windows
+*.exe
+# El .ico se genera en el build desde icon-256.png, para no versionar un
+# derivado que puede quedar desincronizado con el original.
+assets/icon.ico
+
+# Estado de la herramienta de desarrollo
+.freebuff/
 
 # VS Code
 .vscode/

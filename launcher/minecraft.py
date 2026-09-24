@@ -2,7 +2,8 @@ import logging
 import subprocess
 import minecraft_launcher_lib
 import os
-import json
+
+from launcher.storage import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -12,46 +13,43 @@ MINECRAFT_DIR = os.path.expanduser("~/.stellaclient")
 
 MICROSOFT_CLIENT_ID = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb"
 
+DEFAULT_SETTINGS = {
+    "ram": 4,
+    "version": "1.21.11",
+    "username": "Player",
+    "java_path": "java",
+}
+
+
+def expand_path(value):
+    """Convierte '~', variables de entorno y rutas relativas en una ruta absoluta."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return os.path.abspath(os.path.expanduser(os.path.expandvars(value.strip())))
+
 
 def load_settings():
-    default_settings = {
-        "ram": 4,
-        "version": "1.21.11",
-        "username": "Player",
-        "java_path": "java",
-    }
-
-    if not os.path.exists(CONFIG_FILE):
-        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        save_settings(default_settings)
-        return default_settings
-
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return default_settings
+    stored = load_json(CONFIG_FILE, {})
+    if not isinstance(stored, dict):
+        stored = {}
+    settings = {**DEFAULT_SETTINGS, **stored}
+    # Configuraciones antiguas pueden guardar '~/.stellaclient' tal cual
+    if settings.get("minecraft_dir"):
+        settings["minecraft_dir"] = expand_path(settings["minecraft_dir"])
+    return settings
 
 
 def save_settings(data):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    save_json(CONFIG_FILE, data)
 
 
 def load_auth():
-    if not os.path.exists(AUTH_FILE):
-        return None
-    try:
-        with open(AUTH_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    auth = load_json(AUTH_FILE, None)
+    return auth if isinstance(auth, dict) else None
 
 
 def save_auth(data):
-    os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
-    with open(AUTH_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    save_json(AUTH_FILE, data)
 
 
 def is_logged_in():
@@ -72,14 +70,24 @@ def get_device_code_info():
     return resp.json()
 
 
-def _finish_auth(tokens):
-    import minecraft_launcher_lib.microsoft_account as ma
-    xbl = ma.authenticate_with_xbl(tokens["access_token"])
-    uhs = xbl.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs", "")
-    xsts = ma.authenticate_with_xsts(xbl["Token"])
-    mc = ma.authenticate_with_minecraft(uhs, xsts["Token"])
-    profile = ma.get_profile(mc["access_token"])
-    auth_info = {
+def finish_microsoft_auth(tokens):
+    """Cadena completa XBL → XSTS → Minecraft guardando la sesión.
+
+    Único sitio con esta lógica (api.py delega aquí). Devuelve
+    {"username", "uuid"} o {"error": <motivo>}.
+    """
+    try:
+        import minecraft_launcher_lib.microsoft_account as ma
+        xbl = ma.authenticate_with_xbl(tokens["access_token"])
+        uhs = xbl.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs", "")
+        xsts = ma.authenticate_with_xsts(xbl["Token"])
+        mc = ma.authenticate_with_minecraft(uhs, xsts["Token"])
+        profile = ma.get_profile(mc["access_token"])
+    except Exception as e:
+        logger.warning(f"Microsoft auth failed: {e}")
+        return {"error": str(e)}
+
+    save_auth({
         "access_token": tokens["access_token"],
         "refresh_token": tokens.get("refresh_token", ""),
         "xbl_token": xbl["Token"],
@@ -87,9 +95,18 @@ def _finish_auth(tokens):
         "mc_access_token": mc["access_token"],
         "uuid": profile["id"],
         "username": profile["name"],
-    }
-    save_auth(auth_info)
-    return profile["name"]
+    })
+    return {"username": profile["name"], "uuid": profile["id"]}
+
+
+def offline_uuid(username):
+    """UUID offline con el mismo cálculo que el servidor: md5('OfflinePlayer:<nombre>')."""
+    import hashlib
+    digest = bytearray(hashlib.md5(f"OfflinePlayer:{username}".encode("utf-8")).digest())
+    digest[6] = (digest[6] & 0x0F) | 0x30  # versión 3
+    digest[8] = (digest[8] & 0x3F) | 0x80  # variante RFC 4122
+    value = digest.hex()
+    return f"{value[0:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}"
 
 
 def logout():
@@ -125,12 +142,6 @@ def has_offline_account():
     return not is_logged_in() and settings.get("username", "Player") != "Player"
 
 
-def clear_offline_account():
-    settings = load_settings()
-    settings["username"] = "Player"
-    save_settings(settings)
-
-
 def get_available_versions():
     try:
         manifest = minecraft_launcher_lib.utils.get_version_list()
@@ -146,13 +157,88 @@ def get_available_versions():
         return ["26.1.2", "26.1.1", "26.1", "1.21.11", "1.21.1", "1.21", "1.20.4", "1.20.1", "1.20", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.15.2", "1.14.4", "1.13.2", "1.12.2", "1.11.2", "1.10.2", "1.9.4", "1.8.9"]
 
 
-def launch_minecraft():
+def game_dir_for(settings=None):
+    settings = settings if settings is not None else load_settings()
+    return expand_path(settings.get("minecraft_dir")) or MINECRAFT_DIR
+
+
+def mods_dir_for(game_dir):
+    return os.environ.get("STELLA_MODS_DIR") or os.path.join(game_dir, "mods")
+
+
+def has_game_mods(game_dir):
+    mods_dir = mods_dir_for(game_dir)
+    try:
+        return os.path.isdir(mods_dir) and any(f.endswith(".jar") for f in os.listdir(mods_dir))
+    except OSError:
+        return False
+
+
+def is_version_installed(version, game_dir):
+    """Comprueba barato (sin red) si el cliente de esa versión ya está en disco.
+
+    Sirve para saber si el arranque va a tener que descargar algo y, con eso,
+    decidir si tiene sentido mostrar la barra de progreso.
+    """
+    base = os.path.join(game_dir, "versions", version)
+    return (os.path.isfile(os.path.join(base, version + ".json"))
+            and os.path.isfile(os.path.join(base, version + ".jar")))
+
+
+def launch_plan():
+    """Qué va a hacer el arranque: versión, carpeta y si hace falta descargar.
+
+    Sin llamadas de red a propósito: se ejecuta en el hilo del lanzamiento y solo
+    mira el disco. Para Fabric se acepta cualquier perfil instalado de esa versión
+    de Minecraft (el loader exacto lo decide la librería más tarde).
+    """
+    settings = load_settings()
+    version = settings.get("version", "1.21.11")
+    game_dir = game_dir_for(settings)
+    has_mods = has_game_mods(game_dir)
+
+    needs_download = not is_version_installed(version, game_dir)
+    if has_mods and not needs_download:
+        versions_dir = os.path.join(game_dir, "versions")
+        suffix = f"-{version}"
+        try:
+            needs_download = not any(
+                name.startswith("fabric-loader-") and name.endswith(suffix)
+                and os.path.isdir(os.path.join(versions_dir, name))
+                for name in os.listdir(versions_dir)
+            )
+        except OSError:
+            needs_download = True
+
+    return {
+        "version": version,
+        "game_dir": game_dir,
+        "has_mods": has_mods,
+        "needs_download": needs_download,
+    }
+
+
+def launch_minecraft(callback=None):
+    """Lanza el juego. `callback` es el CallbackDict de minecraft_launcher_lib
+    (setStatus/setProgress/setMax) y sirve para seguir la descarga de archivos."""
+    callback = callback or {}
+
+    def report(text):
+        set_status = callback.get("setStatus")
+        if set_status:
+            try:
+                set_status(text)
+            except Exception:  # nunca romper el arranque por un fallo de la UI
+                pass
+
     settings = load_settings()
     version = settings.get("version", "1.21.11")
     ram = settings.get("ram", 4)
-    java_path = settings.get("java_path", "java")
+    java_path = settings.get("java_path") or "java"
+    if java_path.startswith("~"):
+        java_path = os.path.expanduser(java_path)
     ram_argument = f"-Xmx{ram}G"
-    game_dir = settings.get("minecraft_dir", MINECRAFT_DIR)
+    game_dir = game_dir_for(settings)
 
     logger.info("--- Launching Stella Client ---")
     logger.info(f"Version: {version}")
@@ -162,13 +248,13 @@ def launch_minecraft():
 
     os.makedirs(game_dir, exist_ok=True)
 
-    mods_dir = os.environ.get("STELLA_MODS_DIR", os.path.join(game_dir, "mods"))
-    has_mods = os.path.isdir(mods_dir) and any(f.endswith(".jar") for f in os.listdir(mods_dir))
+    has_mods = has_game_mods(game_dir)
 
     if has_mods:
         logger.info(f"Installing Fabric for {version}...")
+        report(f"Descargando Fabric para {version}")
         try:
-            minecraft_launcher_lib.fabric.install_fabric(version, game_dir)
+            minecraft_launcher_lib.fabric.install_fabric(version, game_dir, callback=callback)
             logger.info("Fabric installed")
         except Exception as e:
             logger.warning(f"Fabric install failed: {e}")
@@ -176,7 +262,8 @@ def launch_minecraft():
 
     if not has_mods:
         logger.info(f"Installing Minecraft {version} (vanilla)...")
-        minecraft_launcher_lib.install.install_minecraft_version(version, game_dir)
+        report(f"Descargando Minecraft {version}")
+        minecraft_launcher_lib.install.install_minecraft_version(version, game_dir, callback=callback)
 
     auth = load_auth()
     if auth and "mc_access_token" in auth:
@@ -189,10 +276,11 @@ def launch_minecraft():
             "jvmArguments": [ram_argument, "-XX:+UseG1GC"],
         }
     else:
-        logger.info("Playing offline")
+        offline_name = settings.get("username", "Player")
+        logger.info(f"Playing offline as {offline_name}")
         options = {
-            "username": settings.get("username", "Player"),
-            "uuid": "00000000000000000000000000000000",
+            "username": offline_name,
+            "uuid": offline_uuid(offline_name),
             "token": "offline",
             "executablePath": java_path,
             "jvmArguments": [ram_argument, "-XX:+UseG1GC"],
@@ -218,11 +306,10 @@ def launch_minecraft():
         filtered.append(arg)
 
     logger.info("Launching process...")
-    try:
-        subprocess.run(filtered)
-    except Exception as e:
-        logger.error(f"Failed to launch: {e}")
+    report("Iniciando Minecraft")
+    return subprocess.Popen(filtered)
 
 
 if __name__ == "__main__":
-    launch_minecraft()
+    process = launch_minecraft()
+    process.wait()

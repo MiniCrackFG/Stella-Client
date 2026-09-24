@@ -4,22 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stella Client</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@300;400;700&display=swap" rel="stylesheet">
+  <!-- Las fuentes van locales (assets/fonts): sin depender de Google Fonts el
+       arranque no se queda esperando a la red ni cambia de tipografía. -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="splash">
     <img src="logo.png" alt="Stella Client" class="splash-logo" style="width:64px;height:64px;border-radius:12px" />
-    <h1 class="splash-title"><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></h1>
+    <h1 class="splash-title">Stella Client</h1>
     <p class="splash-sub">Minecraft Launcher</p>
     <div class="splash-loader"><span></span><span></span><span></span></div>
   </div>
   <canvas id="stars"></canvas>
   <div id="app">
     <div id="titlebar">
-      <span id="drag-region" class="pywebview-drag-region"><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></span>
+      <span id="drag-region" class="pywebview-drag-region">Stella Client</span>
       <div class="win-btns">
         <button class="win-btn" onclick="minimizeWin()">─</button>
         <button class="win-btn" onclick="maximizeWin()">□</button>
@@ -65,7 +64,7 @@
       
       <div id="page-home" class="page active">
         <div class="hero">
-          <h1><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></h1>
+          <h1>Stella Client</h1>
           <p class="hero-subtitle">Minecraft Launcher</p>
         </div>
         <div class="play-card">
@@ -108,9 +107,8 @@
             <option value="updated">Recently Updated</option>
             <option value="relevance">Relevance</option>
           </select>
-          <select id="mod-source">
+          <select id="mod-source" title="Source">
             <option value="modrinth">Modrinth</option>
-            <option value="forge">Forge</option>
           </select>
           <button id="mod-search-btn" class="btn-primary">Search</button>
         </div>
@@ -175,7 +173,7 @@
           <div class="setting-group">
             <label>Smooth Rendering</label>
             <label class="switch">
-              <input type="checkbox" id="smooth-rendering" />
+              <input type="checkbox" id="smooth-rendering" checked />
               <span class="slider"></span>
             </label>
           </div>
@@ -218,6 +216,15 @@
         </div>
       </div>
     </main>
+    </div>
+    <!-- Barra inferior de descarga: solo se enseña si el arranque tiene que bajar archivos -->
+    <div id="launch-progress" class="launch-progress">
+      <div class="lp-info">
+        <span class="lp-dot"></span>
+        <span id="lp-label">Preparando la descarga</span>
+        <span id="lp-pct" class="lp-pct">0%</span>
+      </div>
+      <div class="lp-track"><div id="lp-fill" class="lp-fill"></div></div>
     </div>
   </div>
 

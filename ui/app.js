@@ -37,22 +37,40 @@ function createStars() {
     });
   }
 
+  let animating = !document.body.classList.contains('no-smooth');
+  let scheduled = false;
+  let staticPainted = false;
+
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(draw);
+  }
+
   function draw(ts) {
+    scheduled = false;
+    if (!animating) {
+      // Sin animación pintamos un único fotograma y dejamos de gastar CPU
+      if (staticPainted) return;
+      staticPainted = true;
+    }
     ctx.clearRect(0, 0, width, height);
     const isLight = document.body.classList.contains('theme-light');
     ctx.fillStyle = isLight ? '#7c5cbf' : '#ffffff';
 
     stars.forEach(s => {
-      s.angle += s.blinkSpeed;
-      s.x += s.driftX;
-      s.y += s.driftY;
-      
-      if (s.x < 0) s.x = width;
-      if (s.x > width) s.x = 0;
-      if (s.y < 0) s.y = height;
-      if (s.y > height) s.y = 0;
+      if (animating) {
+        s.angle += s.blinkSpeed;
+        s.x += s.driftX;
+        s.y += s.driftY;
 
-      const alpha = s.baseAlpha + Math.sin(s.angle) * 0.3;
+        if (s.x < 0) s.x = width;
+        if (s.x > width) s.x = 0;
+        if (s.y < 0) s.y = height;
+        if (s.y > height) s.y = 0;
+      }
+
+      const alpha = animating ? s.baseAlpha + Math.sin(s.angle) * 0.3 : s.baseAlpha;
       ctx.globalAlpha = Math.max(0.1, Math.min(1, alpha));
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
@@ -60,8 +78,8 @@ function createStars() {
     });
     ctx.globalAlpha = 1;
 
-    // Draw shooting stars
-    for (let i = window.shootingStars.length - 1; i >= 0; i--) {
+    // Draw shooting stars (solo mientras la animación está activa)
+    for (let i = animating ? window.shootingStars.length - 1 : -1; i >= 0; i--) {
       const ss = window.shootingStars[i];
       if (!ss.startTime) ss.startTime = ts;
       const elapsed = (ts - ss.startTime) / 1000;
@@ -149,9 +167,17 @@ function createStars() {
       }
     }
 
-    requestAnimationFrame(draw);
+    if (animating) schedule();
   }
-  requestAnimationFrame(draw);
+
+  window.__setBackgroundAnimating = (on) => {
+    animating = !!on;
+    staticPainted = false;
+    if (!animating) window.shootingStars = [];
+    schedule();
+  };
+
+  schedule();
 
   const moon = document.createElement('div');
   moon.className = 'moon';
@@ -200,7 +226,12 @@ function createStars() {
   const animDuration = 30000;
   const travelDist = () => window.innerWidth * 0.8 + 160;
 
+  let moonRunning = true;
+
   function updateMoon(timestamp) {
+    // Sin renderizado suave la luna se queda quieta donde esté, sin bucle
+    if (document.body.classList.contains('no-smooth')) { moonRunning = false; return; }
+    moonRunning = true;
     if (!moon._isDragging) {
       if (!animStartTime) animStartTime = timestamp - animPausedTime;
       const elapsed = timestamp - animStartTime;
@@ -249,6 +280,10 @@ function createStars() {
 
   document.body.appendChild(moon);
   requestAnimationFrame(updateMoon);
+
+  window.__restartMoon = () => {
+    if (!moonRunning && !document.body.classList.contains('no-smooth')) requestAnimationFrame(updateMoon);
+  };
 }
 
 function createShootingStar() {
@@ -299,6 +334,7 @@ function createShootingStar() {
 
 function scheduleShootingStar() {
   function spawn() {
+    if (document.body.classList.contains('no-smooth')) return;
     const roll = Math.random() * 100;
     let count = 1;
     if (roll < 25) count = 3;
@@ -317,6 +353,27 @@ function scheduleShootingStar() {
 let currentPage = 'home';
 let msLoginInterval = null;
 
+/* Seguridad: nunca insertar datos remotos o del usuario en HTML sin escapar */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/* Literal seguro para una cadena JS entre comillas simples dentro de un atributo HTML */
+function jsArg(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/[\r\n]/g, ' ');
+}
+
 /* Global toast */
 function toast(text, type = 'info') {
   const el = document.createElement('div');
@@ -329,7 +386,7 @@ function toast(text, type = 'info') {
 
 /* Window controls */
 function minimizeWin() { pywebview.api.minimize(); }
-function maximizeWin() { pywebview.api.maximize(); }
+function maximizeWin() { pywebview.api.toggle_maximize(); }
 function closeWin() { pywebview.api.close_window(); }
 
 /* Frameless drag via begin_move_drag */
@@ -345,9 +402,9 @@ function initDrag() {
 
 function hideSplash() {
   const s = document.getElementById('splash');
-  if (!s || s.classList.contains('hide')) return;
-  s.classList.add('hide');
-  setTimeout(() => s.remove(), 600);
+  if (!s) return;
+  if (!s.classList.contains('hide')) s.classList.add('hide');
+  setTimeout(() => document.getElementById('splash')?.remove(), 700);
 }
 
 function showSplash() {
@@ -356,28 +413,50 @@ function showSplash() {
 }
 
 function initApp() {
-  createStars();
-  scheduleShootingStar();
-  initInputEffects();
-  showSplash();
-  try { initDrag(); } catch(e) { console.error('initDrag:', e); }
-  initSidebar();
-  initTabs();
-  loadVersions();
-  refreshHome();
-  refreshAccount();
-  initSettings();
-  initModsPage();
-  refreshVersions();
-  refreshInstances();
+  const steps = [
+    createStars, scheduleShootingStar, initInputEffects, showSplash,
+    initDrag, initSidebar, initTabs, loadVersions, refreshHome,
+    refreshAccount, initSettings, initModsPage, refreshVersions, refreshInstances,
+  ];
+  for (const step of steps) {
+    // Un paso que falle no debe impedir que el resto de la UI arranque ni tapar la pantalla
+    try { step(); } catch (e) { console.error('init:', step.name, e); }
+  }
   setTimeout(hideSplash, 1500);
+  setTimeout(hideSplash, 5000);
 }
 
-if (window.pywebview) {
-  initApp();
-} else {
-  window.addEventListener('pywebviewready', initApp);
+/* Espera activa al puente de pywebview: no dependemos de un único evento */
+function whenBridgeReady(callback) {
+  let done = false;
+  const run = () => { if (!done) { done = true; callback(); } };
+  if (window.pywebview && window.pywebview.api) { run(); return; }
+  window.addEventListener('pywebviewready', run);
+  const started = Date.now();
+  const timer = setInterval(() => {
+    if (window.pywebview && window.pywebview.api) {
+      clearInterval(timer);
+      run();
+    } else if (Date.now() - started > 15000) {
+      clearInterval(timer);
+      hideSplash();
+      toast('No se pudo conectar con el backend del launcher', 'error');
+    }
+  }, 100);
 }
+
+/* Cualquier error visible en pantalla en vez de quedarse en un misterio */
+window.addEventListener('error', (e) => {
+  try { toast('Error: ' + (e.message || e), 'error'); } catch (_) { /* ignore */ }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const reason = e.reason && (e.reason.message || e.reason);
+    toast('Error: ' + (reason || 'desconocido'), 'error');
+  } catch (_) { /* ignore */ }
+});
+
+whenBridgeReady(initApp);
 
 /* Navigation */
 function initSidebar() {
@@ -438,15 +517,24 @@ function navigate(page) {
   document.getElementById(`page-${page}`)?.classList.add('active');
   currentPage = page;
   if (page === 'account') refreshAccount();
-  if (page === 'mods') refreshInstalled();
+  if (page === 'mods') {
+    // Se refresca también la lista de Browse: si la primera carga falló (arranque
+    // sin red, error de Modrinth...), al abrir la pestaña se reintenta sola.
+    refreshInstalled();
+    refreshBrowse(browseQuery || undefined, undefined, undefined, browseOffset);
+  }
   if (page === 'versions') refreshVersions();
   if (page === 'instances') refreshInstances();
+  if (page === 'settings') refreshSettingsForm();
   if (page === 'servers') loadServerHistory();
 }
 
 /* Generic Tabs */
 function initTabs() {
+  // Mods y Settings tienen su propio manejador (refrescan datos al cambiar de pestaña),
+  // así que aquí se excluyen para no procesar cada clic dos veces.
   document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    if (btn.closest('.mods-tabs') || btn.closest('.settings-tabs')) return;
     btn.addEventListener('click', () => switchTab(btn.closest('.page').id, btn));
   });
 }
@@ -471,7 +559,7 @@ async function refreshHome() {
     const badge = document.getElementById('instance-badge');
     if (inst) {
       const iconHtml = inst.icon && inst.icon !== '📦' ? inst.icon : '<svg class="ver-star-badge" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>';
-      badge.innerHTML = `<span class="badge-grad">${iconHtml} ${inst.name} · ${inst.version}</span>`;
+      badge.innerHTML = `<span class="badge-grad">${iconHtml} ${escapeHtml(inst.name)} · ${escapeHtml(inst.version)}</span>`;
     } else {
       badge.innerHTML = '<span class="badge-grad"><svg class="ver-star-badge" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> Default</span>';
     }
@@ -480,30 +568,75 @@ async function refreshHome() {
 
 let launchPoll = null;
 
+/* Barra de descarga inferior: solo aparece cuando el arranque tiene que bajar
+   archivos (versión nueva, Fabric, librerías...). Con el juego ya instalado no
+   se enseña nada, porque entonces no hay ninguna descarga que enseñar. */
+function renderLaunchProgress(status) {
+  const bar = document.getElementById('launch-progress');
+  if (!bar) return;
+  const show = !!(status && status.state === 'launching' && status.needs_download);
+  bar.classList.toggle('show', show);
+  // El toast se aparta mientras la barra está abierta (abajo del todo hay barra)
+  document.body.classList.toggle('launch-bar-visible', show);
+  if (!show) return;
+
+  const label = document.getElementById('lp-label');
+  const pct = document.getElementById('lp-pct');
+  const fill = document.getElementById('lp-fill');
+  const max = Number(status.max) || 0;
+  const progress = Number(status.progress) || 0;
+  const known = max > 0;
+  const percent = known ? Math.min(100, Math.round((progress / max) * 100)) : null;
+
+  if (label) label.textContent = status.phase || 'Preparando la descarga';
+  if (pct) pct.textContent = percent === null ? '···' : `${percent}%`;
+  if (fill) {
+    fill.classList.toggle('indeterminate', percent === null);
+    fill.style.width = percent === null ? '' : `${percent}%`;
+  }
+}
+
 document.getElementById('play-btn')?.addEventListener('click', async () => {
   const btn = document.getElementById('play-btn');
+  const resetBtn = () => { btn.textContent = '▶  PLAY'; btn.disabled = false; };
+  const stopPolling = () => { if (launchPoll) { clearInterval(launchPoll); launchPoll = null; } };
   btn.textContent = '⏳ Launching...';
   btn.disabled = true;
   try {
     const ver = document.getElementById('version-current').textContent;
     await pywebview.api.save_settings(JSON.stringify({ version: ver }));
-    await pywebview.api.launch();
-    if (launchPoll) clearInterval(launchPoll);
-    launchPoll = setInterval(async () => {
+    const res = await pywebview.api.launch();
+    if (res && res.ok === false) {
+      toast(res.error || 'No se pudo iniciar Minecraft', 'error');
+      resetBtn();
+      return;
+    }
+    stopPolling();
+    const pollOnce = async () => {
       try {
         const status = await pywebview.api.get_launch_status();
+        renderLaunchProgress(status);
         if (status.state === 'playing') {
           btn.textContent = '▶ Playing';
           btn.disabled = true;
+        } else if (status.state === 'error') {
+          stopPolling();
+          toast(status.message || 'El arranque falló', 'error');
+          resetBtn();
         } else if (status.state === 'stopped') {
-          clearInterval(launchPoll);
-          launchPoll = null;
-          btn.textContent = '▶  PLAY';
-          btn.disabled = false;
+          stopPolling();
+          resetBtn();
         }
       } catch (e) { /* ignore */ }
-    }, 2000);
-  } catch (e) { console.error(e); }
+    };
+    // Primera lectura inmediata (la barra sale al instante) y luego cada 400 ms:
+    // con 2 s el porcentaje daba saltos y parecía congelado.
+    await pollOnce();
+    launchPoll = setInterval(pollOnce, 400);
+  } catch (e) {
+    toast(String(e), 'error');
+    resetBtn();
+  }
 });
 
 /* Instances */
@@ -518,12 +651,12 @@ async function refreshInstances() {
     return;
   }
   list.innerHTML = instances.map(inst => `
-    <div class="instance-card ${inst.id === currentId ? 'active' : ''}" onclick="selectInstance('${inst.id}')">
-      <div class="icon">${inst.icon && inst.icon !== '📦' ? inst.icon : '<svg class="ver-star" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'}</div>
-      <div class="iname">${inst.name}</div>
-      <div class="imeta">${inst.version} · ${inst.ram || 4}GB</div>
+    <div class="instance-card ${inst.id === currentId ? 'active' : ''}" onclick="selectInstance('${jsArg(inst.id)}')">
+      <div class="icon">${inst.icon && inst.icon !== '📦' ? escapeHtml(inst.icon) : '<svg class="ver-star" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'}</div>
+      <div class="iname">${escapeHtml(inst.name)}</div>
+      <div class="imeta">${escapeHtml(inst.version)} · ${Number(inst.ram || 4)}GB</div>
       ${inst.id === currentId ? '<div style="font-size:11px;color:var(--accent);font-weight:600">✓ Active</div>' : ''}
-      <button class="idel" onclick="event.stopPropagation();deleteInstance('${inst.id}')">Delete</button>
+      <button class="idel" onclick="event.stopPropagation();deleteInstance('${jsArg(inst.id)}')">Delete</button>
     </div>
   `).join('');
 }
@@ -533,17 +666,18 @@ async function selectInstance(id) {
   refreshInstances();
   refreshHome();
   loadVersions();
+  refreshSettingsForm();
   // Always refresh mods data regardless of active page
   refreshInstalled();
   browseOffset = 0;
-  refreshBrowse(browseQuery || undefined);
+  refreshBrowse(browseQuery || undefined, undefined, undefined, 0);
 }
 
 function showCreateInstance() {
   const sel = document.getElementById('new-instance-version');
   if (!sel.children.length) {
     pywebview.api.get_versions().then(v => {
-      sel.innerHTML = v.slice(0, 30).map(x => `<option value="${x}">${x}</option>`).join('');
+      sel.innerHTML = v.slice(0, 30).map(x => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`).join('');
     });
   }
   document.getElementById('create-instance-overlay').classList.add('open');
@@ -558,16 +692,28 @@ async function createInstance() {
   if (!name) return;
   const version = document.getElementById('new-instance-version').value;
   const icon = document.getElementById('new-instance-icon').value;
-  await pywebview.api.create_instance(name, version, icon);
+  const inst = await pywebview.api.create_instance(name, version, icon);
   closeCreateInstance();
   document.getElementById('new-instance-name').value = '';
-  refreshInstances();
+  if (inst && inst.id) {
+    // La instancia recién creada se deja activa de una vez: así los mods y los
+    // ajustes van a su carpeta y no a la de la instancia anterior.
+    await selectInstance(inst.id);
+  } else {
+    refreshInstances();
+  }
 }
 
 async function deleteInstance(id) {
   if (!confirm('Delete this instance and all its files?')) return;
   await pywebview.api.delete_instance(id);
+  // El backend reasigna otra instancia si borramos la activa
+  browseOffset = 0;
   refreshInstances();
+  refreshHome();
+  loadVersions();
+  refreshSettingsForm();
+  refreshInstalled();
 }
 
 /* Version Picker */
@@ -581,10 +727,10 @@ async function refreshVersions() {
   const settings = await pywebview.api.get_settings();
   const current = settings.version;
   list.innerHTML = _versionGroups.map(g => `
-    <div class="version-card ${g.versions.includes(current) ? 'active' : ''}" onclick="openVersionSubs('${g.major}')">
+    <div class="version-card ${g.versions.includes(current) ? 'active' : ''}" onclick="openVersionSubs('${jsArg(g.major)}')">
       <div class="version-card-header">
         <div class="icon-placeholder"><svg class="ver-star" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#7a72b0" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
-        <div class="major">${g.major}.x</div>
+        <div class="major">${escapeHtml(g.major)}.x</div>
       </div>
     </div>
   `).join('');
@@ -596,7 +742,7 @@ function openVersionSubs(major) {
   document.getElementById('version-subs-title').textContent = `Minecraft ${major}.x`;
   const current = document.getElementById('version-current').textContent;
   document.getElementById('version-subs-list').innerHTML = group.versions.map(v => `
-    <div class="version-sub ${v === current ? 'active' : ''}" onclick="selectVersion('${v}')">${v}</div>
+    <div class="version-sub ${v === current ? 'active' : ''}" onclick="selectVersion('${jsArg(v)}')">${escapeHtml(v)}</div>
   `).join('');
   document.getElementById('version-subs-overlay').classList.add('open');
 }
@@ -620,7 +766,7 @@ async function loadVersions() {
     const versions = await pywebview.api.get_versions();
     const modVer = document.getElementById('mod-version');
     if (modVer) {
-      modVer.innerHTML = versions.map(v => `<option value="${v}">${v}</option>`).join('');
+      modVer.innerHTML = versions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
       modVer.value = settings.version;
     }
   } catch (e) { console.error(e); }
@@ -632,7 +778,7 @@ function updateNavAvatar(uuid) {
   if (!navAvatar) return;
   pywebview.api.get_avatar(uuid).then(url => {
     if (url) {
-      navAvatar.innerHTML = `<img src="${url}" alt="" />`;
+      navAvatar.innerHTML = `<img src="${escapeHtml(url)}" alt="" />`;
     } else {
       const fallback = 'data:image/svg+xml,' + encodeURIComponent('<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>');
       navAvatar.innerHTML = `<img src="${fallback}" alt="" />`;
@@ -661,32 +807,32 @@ async function refreshAccount() {
       const url = await pywebview.api.get_avatar(skinUuid);
       loginBadge = `
         <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;margin-top:-8px">
-          <img src="${url}" alt="" style="width:64px;height:64px;border-radius:var(--radius);border:2px solid var(--border);background:var(--card);flex-shrink:0" />
+          <img src="${escapeHtml(url)}" alt="" style="width:64px;height:64px;border-radius:var(--radius);border:2px solid var(--border);background:var(--card);flex-shrink:0" />
           <div>
             <div style="font-size:13px;color:var(--text2)">Logged in as</div>
-            <div style="font-size:28px;font-weight:800;color:var(--text)">${displayName}</div>
+            <div style="font-size:28px;font-weight:800;color:var(--text)">${escapeHtml(displayName)}</div>
           </div>
         </div>`;
       skinEl.innerHTML = '';
     } else {
       const url = await pywebview.api.get_avatar('');
-      skinEl.innerHTML = `<img src="${url}" alt="skin" />`;
+      skinEl.innerHTML = `<img src="${escapeHtml(url)}" alt="skin" />`;
     }
 
     if (auth && auth.username) {
       container.innerHTML = loginBadge + `
         <div class="account-card">
           <h3>✓ Premium Account</h3>
-          <p class="label">UUID: ${auth.uuid || 'N/A'}</p>
+          <p class="label">UUID: ${escapeHtml(auth.uuid || 'N/A')}</p>
           <button class="btn-danger" onclick="logoutAccount()">Logout</button>
         </div>`;
     } else {
       container.innerHTML = loginBadge + `
         <div class="account-card">
           <h3>${hasOffline ? '✓ Offline Mode' : 'Offline / Microsoft'}</h3>
-          ${hasOffline ? `<p>Playing as: <strong>${offlineUser}</strong></p>` : '<p>No offline profile configured.</p>'}
+          ${hasOffline ? `<p>Playing as: <strong>${escapeHtml(offlineUser)}</strong></p>` : '<p>No offline profile configured.</p>'}
           <label class="label">Username</label>
-          <input type="text" id="offline-input" placeholder="Enter a nickname" value="${offlineUser || ''}" />
+          <input type="text" id="offline-input" placeholder="Enter a nickname" value="${escapeHtml(offlineUser || '')}" />
           <div class="btn-row">
             <button class="btn-primary" onclick="saveOffline()">Save Offline</button>
             <button class="btn-danger" onclick="deleteOffline()">Delete</button>
@@ -729,11 +875,54 @@ async function startMsLogin() {
     if (di.error) { toast(di.error, 'error'); return; }
     msLoginData = di;
     const area = document.getElementById('ms-login-area');
-    area.innerHTML = `<div class="msg info">
-      Open the browser and enter code: <strong style="font-size:24px">${di.user_code}</strong>
+    area.innerHTML = `<div class="msg info ms-login">
+      <div>Open the browser and enter this code:</div>
+      <div class="ms-code-row">
+        <span class="ms-code" title="Click to copy" onclick="copyMsCode()">${escapeHtml(di.user_code)}</span>
+        <button class="btn-copy" onclick="copyMsCode(this)">📋 Copy code</button>
+      </div>
     </div>`;
     pollMsLogin();
   } catch (e) { toast(String(e), 'error'); }
+}
+
+/* Copiar al portapapeles con tres intentos: GTK (lo más fiable en WebKitGTK),
+   la API del navegador y, si falla, el truco del textarea. */
+async function copyText(text) {
+  if (!text) return false;
+  try {
+    if (await pywebview.api.copy_to_clipboard(text)) return true;
+  } catch (_) { /* seguimos con el siguiente método */ }
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) { /* seguimos */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function copyMsCode(btn) {
+  const code = (msLoginData && msLoginData.user_code) || '';
+  if (!code) return;
+  const ok = await copyText(code);
+  if (btn && btn.textContent) {
+    const original = btn.textContent;
+    btn.textContent = ok ? '✓ Copied' : '✗ Failed';
+    setTimeout(() => { btn.textContent = original; }, 1600);
+  }
+  toast(ok ? `Code ${code} copied to clipboard` : 'Could not copy the code', ok ? 'success' : 'error');
 }
 
 async function pollMsLogin() {
@@ -831,9 +1020,13 @@ function initModsPage() {
       browseOffset = 0;
       browseQuery = '';
       document.getElementById('mod-search').value = '';
-      refreshBrowse();
+      refreshBrowse(undefined, undefined, undefined, 0);
       refreshInstalled();
     });
+  });
+  document.getElementById('mod-sort')?.addEventListener('change', () => {
+    browseOffset = 0;
+    refreshBrowse(browseQuery || undefined, undefined, undefined, 0);
   });
   document.getElementById('mod-search').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -843,65 +1036,83 @@ function initModsPage() {
       if (activeTab?.dataset.tab === 'installed') {
         filterInstalled(q);
       } else {
-        browseOffset = 0;
-        browseQuery = q;
-        refreshBrowse(q || undefined);
+        runBrowseSearch();
       }
     }
   });
-  refreshBrowse();
+  refreshBrowse(undefined, undefined, undefined, 0);
 }
 
-async function refreshBrowse(query, version, source) {
+/* La búsqueda siempre empieza en la primera página y recuerda la consulta */
+function runBrowseSearch() {
+  browseQuery = document.getElementById('mod-search').value.trim();
+  browseOffset = 0;
+  refreshBrowse(browseQuery || undefined, undefined, undefined, 0);
+}
+
+function retryBrowseBtn() {
+  return '<div class="pagination"><button class="btn-page" onclick="refreshBrowse(browseQuery || undefined, undefined, undefined, browseOffset)">↻ Reintentar</button></div>';
+}
+
+async function refreshBrowse(query, version, source, offset) {
   const container = document.getElementById('mods-browse');
   container.innerHTML = '<div class="loading">Loading...</div>';
   const selVersion = document.getElementById('mod-version');
   const selSource = document.getElementById('mod-source');
-  const v = version || (selVersion ? selVersion.value : '1.21.1');
+  const selSort = document.getElementById('mod-sort');
+  let v = version || (selVersion ? selVersion.value : '');
+  if (!v) {
+    // El <select> de versiones se rellena de forma asíncrona: si aún está vacío
+    // (primer arranque), se consulta la versión instalada para no pedir a
+    // Modrinth una lista sin filtrar por versión.
+    try { v = (await pywebview.api.get_settings()).version || ''; } catch (_) { /* ignore */ }
+  }
   const s = source || (selSource ? selSource.value : 'modrinth');
+  const sort = selSort ? selSort.value : 'downloads';
   const pt = currentCategory;
-  const off = query !== undefined ? 0 : browseOffset;
+  const off = offset === undefined ? browseOffset : offset;
   try {
     let data;
-    if (query) data = await pywebview.api.search_mods(query, v, s, pt, off);
-    else data = await pywebview.api.get_trending_mods(pt, off);
+    if (query) data = await pywebview.api.search_mods(query, v, s, pt, off, sort);
+    else data = await pywebview.api.get_trending_mods(pt, off, sort);
+    if (data.error) { container.innerHTML = `<div class="loading">Error: ${escapeHtml(data.error)}</div>${retryBrowseBtn()}`; return; }
     const mods = data.mods || [];
     const total = data.total_hits || 0;
-    if (mods.length === 0) { container.innerHTML = '<div class="loading">No results found.</div>'; return; }
+    if (mods.length === 0) { container.innerHTML = `<div class="loading">No hay resultados para ${escapeHtml(v)}${query ? ' con "' + escapeHtml(query) + '"' : ''}.</div>${retryBrowseBtn()}`; return; }
     const installed = await pywebview.api.get_installed_mods(pt);
-    const installedIds = new Set(installed.mods.filter(m => m.mod_id).map(m => m.mod_id));
+    const installedIds = new Set((installed.mods || []).filter(m => m.mod_id).map(m => m.mod_id));
     const hasPrev = off > 0;
     const hasNext = off + PAGE_SIZE < total;
     container.innerHTML = mods.map(m => `
       <div class="mod-card">
         <div class="mod-icon">
-          ${m.thumbnail ? `<img src="${m.thumbnail}" alt="" />` : '📦'}
+          ${m.thumbnail ? `<img src="${escapeHtml(m.thumbnail)}" alt="" />` : '📦'}
         </div>
         <div class="mod-info">
-          <div class="name" style="cursor:pointer" onclick="showModDetail('${m.mod_id}')">${m.name}</div>
-          <div class="desc">${(m.description || '').slice(0, 100)}${m.description?.length > 100 ? '...' : ''}</div>
-          <div class="meta">v${m.version || 'N/A'} · ${(m.downloads || 0).toLocaleString()} downloads</div>
+          <div class="name" style="cursor:pointer" onclick="showModDetail('${jsArg(m.mod_id)}')">${escapeHtml(m.name)}</div>
+          <div class="desc">${escapeHtml((m.description || '').slice(0, 100))}${(m.description || '').length > 100 ? '...' : ''}</div>
+          <div class="meta">v${escapeHtml(m.version || 'N/A')} · ${Number(m.downloads || 0).toLocaleString()} downloads</div>
         </div>
         ${installedIds.has(m.mod_id)
           ? `<button class="btn-sm installed" disabled>✓ Installed</button>`
-          : `<button class="btn-sm install" onclick="installMod('${m.mod_id}','${v}','${s}','${pt}','${m.thumbnail || ''}',this)">Download</button>`
+          : `<button class="btn-sm install" onclick="installMod('${jsArg(m.mod_id)}','${jsArg(v)}','${jsArg(s)}','${jsArg(pt)}','${jsArg(m.thumbnail || '')}',this)">Download</button>`
         }
       </div>
     `).join('');
     container.innerHTML += `
       <div class="pagination">
         <button class="btn-page" onclick="goBrowsePage(-1)" ${hasPrev ? '' : 'disabled'}>← Previous</button>
-        <span class="page-info">Page ${Math.floor(off / PAGE_SIZE) + 1} of ${Math.ceil(total / PAGE_SIZE)}</span>
+        <span class="page-info">Page ${Math.floor(off / PAGE_SIZE) + 1} of ${Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
         <button class="btn-page" onclick="goBrowsePage(1)" ${hasNext ? '' : 'disabled'}>Next →</button>
       </div>`;
   } catch (e) {
-    container.innerHTML = `<div class="loading">Error: ${e}</div>`;
+    container.innerHTML = `<div class="loading">Error: ${escapeHtml(e)}</div>${retryBrowseBtn()}`;
   }
 }
 
 function goBrowsePage(dir) {
   browseOffset = Math.max(0, browseOffset + dir * PAGE_SIZE);
-  refreshBrowse(browseQuery || undefined);
+  refreshBrowse(browseQuery || undefined, undefined, undefined, browseOffset);
 }
 
 async function refreshInstalled() {
@@ -912,7 +1123,7 @@ async function refreshInstalled() {
     container.dataset.all = JSON.stringify(mods);
     renderInstalled(mods);
   } catch (e) {
-    container.innerHTML = `<div class="loading">Error: ${e}</div>`;
+    container.innerHTML = `<div class="loading">Error: ${escapeHtml(e)}</div>`;
   }
 }
 
@@ -926,13 +1137,13 @@ function renderInstalled(mods) {
   container.innerHTML = mods.map(m => `
     <div class="mod-card">
       <div class="mod-icon">
-        ${m.thumbnail ? `<img src="${m.thumbnail}" alt="" />` : '📦'}
+        ${m.thumbnail ? `<img src="${escapeHtml(m.thumbnail)}" alt="" />` : '📦'}
       </div>
       <div class="mod-info">
-        <div class="name" style="cursor:pointer" onclick="showModDetail('${m.mod_id}')">${m.name}</div>
-        <div class="meta">${(m.size / (1024*1024)).toFixed(2)} MB${m.project_type ? ' · '+m.project_type : ''}</div>
+        <div class="name" ${m.mod_id ? `style="cursor:pointer" onclick="showModDetail('${jsArg(m.mod_id)}')"` : ''}>${escapeHtml(m.name)}</div>
+        <div class="meta">${(Number(m.size || 0) / (1024*1024)).toFixed(2)} MB${m.project_type ? ' · '+escapeHtml(m.project_type) : ''}</div>
       </div>
-      <button class="btn-sm delete" onclick="deleteMod('${m.filename}',this)">Delete</button>
+      <button class="btn-sm delete" onclick="deleteMod('${jsArg(m.filename)}',this)">Delete</button>
     </div>
   `).join('');
 }
@@ -951,10 +1162,19 @@ async function installMod(modId, version, source, projectType, thumbnail, btn, l
   btn.textContent = 'Downloading...';
   btn.disabled = true;
   try {
-    await pywebview.api.download_mod(modId, version, source, projectType || currentCategory, thumbnail || '');
-    refreshBrowse();
+    const res = await pywebview.api.download_mod(modId, version, source, projectType || currentCategory, thumbnail || '');
+    if (res && res.ok === false) {
+      btn.textContent = 'Error';
+      btn.disabled = false;
+      toast(res.error || 'No se pudo descargar', 'error');
+      return;
+    }
+    toast('Descarga completada', 'success');
+    refreshBrowse(browseQuery || undefined, undefined, undefined, browseOffset);
   } catch (e) {
     btn.textContent = 'Error';
+    btn.disabled = false;
+    toast(String(e), 'error');
   }
 }
 
@@ -962,14 +1182,23 @@ async function deleteMod(filename, btn) {
   btn.textContent = 'Deleting...';
   btn.disabled = true;
   try {
-    await pywebview.api.delete_mod(filename);
+    const res = await pywebview.api.delete_mod(filename);
+    if (res && res.ok === false) {
+      btn.textContent = 'Error';
+      btn.disabled = false;
+      toast('No se pudo borrar el archivo', 'error');
+      return;
+    }
     refreshInstalled();
-  } catch (e) { btn.textContent = 'Error'; }
+  } catch (e) {
+    btn.textContent = 'Error';
+    btn.disabled = false;
+    toast(String(e), 'error');
+  }
 }
 
 document.getElementById('mod-search-btn')?.addEventListener('click', () => {
-  const q = document.getElementById('mod-search').value.trim();
-  refreshBrowse(q || undefined);
+  runBrowseSearch();
 });
 
 document.querySelectorAll('.mods-tabs .tab-btn').forEach(btn => {
@@ -995,7 +1224,7 @@ async function detectJava() {
     if (!javas.length) { alert('No Java installations found.'); return; }
     list.style.display = 'block';
     list.innerHTML = '<option value="">Select a Java version...</option>' +
-      javas.map(j => `<option value="${j.path}">${j.version} — ${j.path}</option>`).join('');
+      javas.map(j => `<option value="${escapeHtml(j.path)}">${escapeHtml(j.version)} — ${escapeHtml(j.path)}</option>`).join('');
   } catch (e) {
     btn.textContent = '🔍 Detect Java';
     btn.disabled = false;
@@ -1009,6 +1238,35 @@ function applyDetectedJava(path) {
 }
 
 /* Settings */
+/* Desactiva las animaciones (estrellas, luna, transiciones) para equipos modestos.
+   El fondo se sigue viendo: se pinta un fotograma estático y se para el bucle. */
+function applySmoothRendering(enabled) {
+  const off = !enabled;
+  if (document.body.classList.contains('no-smooth') === off) return;
+  document.body.classList.toggle('no-smooth', off);
+  if (typeof window.__setBackgroundAnimating === 'function') window.__setBackgroundAnimating(!off);
+  if (!off && typeof window.__restartMoon === 'function') window.__restartMoon();
+}
+
+/* Los campos de Ajustes reflejan la instancia activa (RAM, Java, carpeta del
+   juego). Si no se refrescan al cambiar de instancia, guardar cualquier ajuste
+   escribe los valores de la instancia anterior en la nueva: así acababa una
+   instancia nueva apuntando a la carpeta de 'default'. */
+async function refreshSettingsForm() {
+  try {
+    const settings = await pywebview.api.get_settings();
+    const ram = Number(settings.ram) || 4;
+    const slider = document.getElementById('ram-slider');
+    if (slider) slider.value = ram;
+    const ramValue = document.getElementById('ram-value');
+    if (ramValue) ramValue.textContent = ram + ' GB';
+    const javaPath = document.getElementById('java-path');
+    if (javaPath) javaPath.value = settings.java_path || 'java';
+    const mcDir = document.getElementById('mc-dir');
+    if (mcDir) mcDir.value = settings.minecraft_dir || '~/.stellaclient';
+  } catch (e) { console.error(e); }
+}
+
 async function initSettings() {
   try {
     const settings = await pywebview.api.get_settings();
@@ -1028,18 +1286,17 @@ async function initSettings() {
       document.getElementById('corner-value').textContent = val;
       pywebview.api.save_settings(JSON.stringify({ corner_radius: parseInt(e.target.value) }));
     });
-    document.getElementById('smooth-rendering').checked = !!settings.smooth_rendering;
+    const smooth = settings.smooth_rendering !== false;
+    document.getElementById('smooth-rendering').checked = smooth;
+    applySmoothRendering(smooth);
     document.getElementById('smooth-rendering').addEventListener('change', (e) => {
+      applySmoothRendering(e.target.checked);
       pywebview.api.save_settings(JSON.stringify({ smooth_rendering: e.target.checked }));
     });
-    document.getElementById('ram-slider').value = settings.ram || 4;
-    document.getElementById('ram-value').textContent = (settings.ram || 4) + ' GB';
     document.getElementById('ram-slider').addEventListener('input', (e) => {
       document.getElementById('ram-value').textContent = e.target.value + ' GB';
       pywebview.api.save_settings(JSON.stringify({ ram: parseInt(e.target.value) }));
     });
-    document.getElementById('java-path').value = settings.java_path || 'java';
-    document.getElementById('mc-dir').value = settings.minecraft_dir || '~/.stellaclient';
     document.getElementById('discord-rpc').checked = settings.discord_rpc !== false;
     document.getElementById('discord-rpc').addEventListener('change', (e) => {
       pywebview.api.save_settings(JSON.stringify({ discord_rpc: e.target.checked }));
@@ -1049,6 +1306,7 @@ async function initSettings() {
       pywebview.api.save_settings(JSON.stringify({ hw_accel: e.target.checked }));
       toast('Requires restart to take effect.', 'info');
     });
+    await refreshSettingsForm();
   } catch (e) { console.error(e); }
 }
 document.getElementById('save-java-btn')?.addEventListener('click', async () => {
@@ -1087,7 +1345,7 @@ async function showModDetail(modId) {
 
   try {
     const d = await pywebview.api.get_mod_detail(modId);
-    if (d.error) { body.innerHTML = `<div class="loading">Error: ${d.error}</div>`; return; }
+    if (d.error) { body.innerHTML = `<div class="loading">Error: ${escapeHtml(d.error)}</div>`; return; }
 
     const installed = await pywebview.api.get_installed_mods();
     const isInstalled = installed.mods.some(m => m.mod_id === modId);
@@ -1097,29 +1355,29 @@ async function showModDetail(modId) {
     body.innerHTML = `
       <div class="mod-detail-header">
         <div class="mod-detail-icon">
-          ${d.thumbnail ? `<img src="${d.thumbnail}" alt="" />` : '📦'}
+          ${d.thumbnail ? `<img src="${escapeHtml(d.thumbnail)}" alt="" />` : '📦'}
         </div>
         <div class="mod-detail-info">
-          <h2>${d.name}</h2>
+          <h2>${escapeHtml(d.name)}</h2>
           <div class="stats">
             <span>Downloads: <strong>${(d.downloads || 0).toLocaleString()}</strong></span>
             <span>Followers: <strong>${(d.followers || 0).toLocaleString()}</strong></span>
           </div>
-          ${d.license ? `<div class="stats"><span>License: <strong>${d.license}</strong></span></div>` : ''}
-          ${d.loaders?.length ? `<div class="stats"><span>Loaders: <strong>${d.loaders.join(', ')}</strong></span></div>` : ''}
-          ${d.game_versions?.length ? `<div class="stats"><span>Game versions: <strong>${d.game_versions.join(', ')}</strong></span></div>` : ''}
-          ${d.categories?.length || d.additional_categories?.length ? `<div class="stats"><span>Categories: ${[...(d.categories||[]), ...(d.additional_categories||[])].map(c => '#'+c).join(' · ')}</span></div>` : ''}
+          ${d.license ? `<div class="stats"><span>License: <strong>${escapeHtml(d.license)}</strong></span></div>` : ''}
+          ${d.loaders?.length ? `<div class="stats"><span>Loaders: <strong>${d.loaders.map(escapeHtml).join(', ')}</strong></span></div>` : ''}
+          ${d.game_versions?.length ? `<div class="stats"><span>Game versions: <strong>${d.game_versions.map(escapeHtml).join(', ')}</strong></span></div>` : ''}
+          ${d.categories?.length || d.additional_categories?.length ? `<div class="stats"><span>Categories: ${[...(d.categories||[]), ...(d.additional_categories||[])].map(c => '#'+escapeHtml(c)).join(' · ')}</span></div>` : ''}
           <div class="stats">
             <span>Published: <strong>${fmtDate(d.published)}</strong></span>
             <span>Updated: <strong>${fmtDate(d.updated)}</strong></span>
           </div>
           <div class="stats">
-            <span>Client: <strong>${d.client_side || 'N/A'}</strong></span>
-            <span>Server: <strong>${d.server_side || 'N/A'}</strong></span>
+            <span>Client: <strong>${escapeHtml(d.client_side || 'N/A')}</strong></span>
+            <span>Server: <strong>${escapeHtml(d.server_side || 'N/A')}</strong></span>
           </div>
           ${isInstalled
             ? '<button class="btn-sm installed" style="margin-top:10px" disabled>✓ Installed</button>'
-            : '<button class="btn-primary" style="margin-top:10px" onclick="installMod(\'' + modId + '\',\'' + (document.getElementById('mod-version')?.value || '1.21.1') + '\',\'' + (document.getElementById('mod-source')?.value || 'modrinth') + '\',\'' + currentCategory + '\',\'' + (d.thumbnail || '') + '\',this); closeModDetail()">Download</button>'
+            : '<button class="btn-primary" style="margin-top:10px" onclick="installMod(\'' + jsArg(modId) + '\',\'' + jsArg(document.getElementById('mod-version')?.value || '1.21.1') + '\',\'' + jsArg(document.getElementById('mod-source')?.value || 'modrinth') + '\',\'' + jsArg(currentCategory) + '\',\'' + jsArg(d.thumbnail || '') + '\',this); closeModDetail()">Download</button>'
           }
         </div>
       </div>
@@ -1130,8 +1388,8 @@ async function showModDetail(modId) {
           <div class="mod-gallery">
             ${d.gallery.map(g => `
               <div class="mod-gallery-item">
-                <img src="${g.url}" alt="${g.title || ''}" loading="lazy" />
-                ${g.description ? `<div class="mod-gallery-caption">${g.description}</div>` : ''}
+                <img src="${escapeHtml(g.url)}" alt="${escapeHtml(g.title || '')}" loading="lazy" />
+                ${g.description ? `<div class="mod-gallery-caption">${escapeHtml(g.description)}</div>` : ''}
               </div>
             `).join('')}
           </div>
@@ -1142,12 +1400,12 @@ async function showModDetail(modId) {
         <div class="mod-detail-section">
           <h3>Links</h3>
           <div class="mod-links">
-            ${d.discord_url ? `<a href="${d.discord_url}" target="_blank" class="mod-link">💬 Discord</a>` : ''}
-            ${d.issues_url ? `<a href="${d.issues_url}" target="_blank" class="mod-link">🐛 Issues</a>` : ''}
-            ${d.source_url ? `<a href="${d.source_url}" target="_blank" class="mod-link">📄 Source</a>` : ''}
-            ${d.wiki_url ? `<a href="${d.wiki_url}" target="_blank" class="mod-link">📖 Wiki</a>` : ''}
+            ${d.discord_url ? `<a href="${escapeHtml(d.discord_url)}" target="_blank" class="mod-link">💬 Discord</a>` : ''}
+            ${d.issues_url ? `<a href="${escapeHtml(d.issues_url)}" target="_blank" class="mod-link">🐛 Issues</a>` : ''}
+            ${d.source_url ? `<a href="${escapeHtml(d.source_url)}" target="_blank" class="mod-link">📄 Source</a>` : ''}
+            ${d.wiki_url ? `<a href="${escapeHtml(d.wiki_url)}" target="_blank" class="mod-link">📖 Wiki</a>` : ''}
             ${(d.donation_urls || []).map(du =>
-              `<a href="${du.url}" target="_blank" class="mod-link">❤️ ${du.platform}</a>`
+              `<a href="${escapeHtml(du.url)}" target="_blank" class="mod-link">❤️ ${escapeHtml(du.platform)}</a>`
             ).join('')}
           </div>
         </div>
@@ -1155,11 +1413,11 @@ async function showModDetail(modId) {
 
       <div class="mod-detail-section">
         <h3>Description</h3>
-        <div class="mod-detail-desc">${d.description || 'No description available.'}</div>
+        <div class="mod-detail-desc">${escapeHtml(d.description || 'No description available.')}</div>
       </div>
     `;
   } catch (e) {
-    body.innerHTML = `<div class="loading">Error: ${e}</div>`;
+    body.innerHTML = `<div class="loading">Error: ${escapeHtml(e)}</div>`;
   }
 }
 
@@ -1210,7 +1468,7 @@ function loadServerHistory() {
   const list = document.getElementById('server-recent');
   const recent = JSON.parse(localStorage.getItem('recentServers') || '[]');
   if (!recent.length) { list.innerHTML = '<div class="loading" style="padding:10px 0">No recent servers.</div>'; return; }
-  list.innerHTML = recent.map(ip => `<div class="server-recent-item" onclick="document.getElementById('server-ip').value='${ip}';checkServer()">🌐 ${ip}</div>`).join('');
+  list.innerHTML = recent.map(ip => `<div class="server-recent-item" onclick="document.getElementById('server-ip').value='${jsArg(ip)}';checkServer()">🌐 ${escapeHtml(ip)}</div>`).join('');
 }
 
 async function checkServer() {
@@ -1220,17 +1478,17 @@ async function checkServer() {
   result.innerHTML = '<div class="loading">Checking...</div>';
   try {
     const d = await pywebview.api.get_server_info(ip);
-    if (d.error) { result.innerHTML = `<div class="msg error">${d.error}</div>`; return; }
+    if (d.error) { result.innerHTML = `<div class="msg error">${escapeHtml(d.error)}</div>`; return; }
     const online = d.online;
     result.innerHTML = `
       <div class="server-card">
         <div class="icon">${online ? '🟢' : '🔴'}</div>
         <div class="info">
-          <div class="name">${d.hostname || ip}</div>
-          ${d.motd?.clean?.length ? `<div class="motd">${d.motd.clean.join('<br>')}</div>` : ''}
-          <div class="meta">${d.version || 'Unknown'} · ${d.protocol || '?'} protocol</div>
-          ${online ? `<div class="players">👤 ${d.players?.online || 0}/${d.players?.max || 0} players</div>` : '<div class="players">🔴 Offline</div>'}
-          ${d.players?.list?.length ? `<div class="players">Online: ${d.players.list.join(', ')}</div>` : ''}
+          <div class="name">${escapeHtml(d.hostname || ip)}</div>
+          ${d.motd?.clean?.length ? `<div class="motd">${d.motd.clean.map(escapeHtml).join('<br>')}</div>` : ''}
+          <div class="meta">${escapeHtml(d.version || 'Unknown')} · ${escapeHtml(d.protocol || '?')} protocol</div>
+          ${online ? `<div class="players">👤 ${Number(d.players?.online || 0)}/${Number(d.players?.max || 0)} players</div>` : '<div class="players">🔴 Offline</div>'}
+          ${d.players?.list?.length ? `<div class="players">Online: ${d.players.list.map(escapeHtml).join(', ')}</div>` : ''}
         </div>
       </div>`;
     const recent = JSON.parse(localStorage.getItem('recentServers') || '[]');
@@ -1239,7 +1497,7 @@ async function checkServer() {
     localStorage.setItem('recentServers', JSON.stringify(filtered.slice(0, 10)));
     loadServerHistory();
   } catch (e) {
-    result.innerHTML = `<div class="msg error">Error: ${e}</div>`;
+    result.innerHTML = `<div class="msg error">Error: ${escapeHtml(e)}</div>`;
   }
 }
 

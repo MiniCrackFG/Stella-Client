@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -9,6 +10,8 @@ import launcher.instances as instances
 import launcher.minecraft as minecraft
 import launcher.mods as mods
 import launcher.discord_rpc as discord_rpc
+
+logger = logging.getLogger(__name__)
 
 
 def _open_url(url):
@@ -53,7 +56,10 @@ def _cached(key, ttl, func, *args, **kwargs):
     if entry and now - entry["time"] < ttl:
         return entry["data"]
     data = func(*args, **kwargs)
-    _cache[key] = {"data": data, "time": now}
+    # Un fallo no se cachea: si la red estaba caída, el usuario no debe quedarse
+    # viendo "sin resultados" durante todo el TTL.
+    if not (isinstance(data, dict) and data.get("error")):
+        _cache[key] = {"data": data, "time": now}
     return data
 
 
@@ -79,18 +85,29 @@ class API:
             updates = json.loads(data)
         else:
             updates = data
+        # Normalizamos las rutas que llegan de la UI ('~/.stellaclient', rutas relativas...)
+        if isinstance(updates.get("minecraft_dir"), str) and updates["minecraft_dir"].strip():
+            updates["minecraft_dir"] = minecraft.expand_path(updates["minecraft_dir"])
+        if isinstance(updates.get("java_path"), str):
+            java_path = updates["java_path"].strip()
+            updates["java_path"] = os.path.expanduser(java_path) if java_path.startswith("~") else java_path
         current = minecraft.load_settings()
         current.update(updates)
         minecraft.save_settings(current)
         inst = self.get_current_instance()
         if inst:
-            for key in ("version", "ram", "java_path"):
-                if key in updates:
-                    instances.update_instance(inst["id"], {key: updates[key]})
+            instance_keys = ("version", "ram", "java_path", "minecraft_dir")
+            updated = instances.update_instance(inst["id"], {k: updates[k] for k in instance_keys if k in updates})
+            if updated and updated.get("mods_dir"):
+                os.environ["STELLA_MODS_DIR"] = updated["mods_dir"]
         return {"ok": True}
 
     def get_auth(self):
-        return minecraft.load_auth()
+        """Nunca exponer tokens al frontend: solo lo que la UI necesita mostrar."""
+        auth = minecraft.load_auth()
+        if not auth:
+            return None
+        return {"username": auth.get("username"), "uuid": auth.get("uuid")}
 
     def get_current_user(self):
         return minecraft.get_current_user()
@@ -116,7 +133,7 @@ class API:
         except Exception as e:
             return {"error": str(e)}
 
-    def poll_microsoft_login(self, device_code, interval=5):
+    def poll_microsoft_login(self, device_code):
         import requests
         td = {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
@@ -146,25 +163,11 @@ class API:
             return {"error": str(e)}
 
     def _finish_microsoft_auth(self, tokens):
-        try:
-            import minecraft_launcher_lib.microsoft_account as ma
-            xbl = ma.authenticate_with_xbl(tokens["access_token"])
-            uhs = xbl.get("DisplayClaims", {}).get("xui", [{}])[0].get("uhs", "")
-            xsts = ma.authenticate_with_xsts(xbl["Token"])
-            mc = ma.authenticate_with_minecraft(uhs, xsts["Token"])
-            profile = ma.get_profile(mc["access_token"])
-            minecraft.save_auth({
-                "access_token": tokens["access_token"],
-                "refresh_token": tokens.get("refresh_token", ""),
-                "xbl_token": xbl["Token"],
-                "xsts_token": xsts["Token"],
-                "mc_access_token": mc["access_token"],
-                "uuid": profile["id"],
-                "username": profile["name"],
-            })
-            return {"status": "success", "username": profile["name"]}
-        except Exception as e:
-            return {"error": str(e)}
+        # La lógica vive en launcher.minecraft: aquí solo se adapta la respuesta
+        result = minecraft.finish_microsoft_auth(tokens)
+        if result.get("error"):
+            return result
+        return {"status": "success", "username": result["username"]}
 
     def get_versions(self):
         return minecraft.get_available_versions()
@@ -274,80 +277,154 @@ class API:
         return result
 
     _launch_status = {"state": "stopped"}
+    _progress_lock = threading.Lock()
 
-    def _detect_java(self):
-        try:
-            import psutil
-        except ImportError:
-            time.sleep(5)
-            self._launch_status["state"] = "playing"
-            return
-        time.sleep(3)
-        for _ in range(120):
-            for proc in psutil.process_iter(['name']):
-                try:
-                    if 'java' in proc.info['name'].lower():
-                        self._launch_status["state"] = "playing"
-                        return
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            time.sleep(1)
+    # Los textos de progreso de minecraft_launcher_lib vienen en inglés y son
+    # tecnicos: aquí se traducen a algo que se pueda enseñar en la barra.
+    _PHASE_LABELS = {
+        "Download Libraries": "Descargando librerías",
+        "Download Assets": "Descargando recursos",
+        "Install java runtime": "Instalando Java",
+        "Installation complete": "Instalación completa",
+        "Running fabric installer": "Instalando Fabric",
+    }
+
+    def _publish(self, **fields):
+        """Actualiza el estado del lanzamiento desde cualquier hilo.
+
+        Los callbacks de minecraft_launcher_lib llegan desde su ThreadPoolExecutor,
+        así que el dict se reemplaza entero bajo lock (nunca se muta en sitio).
+        """
+        with self._progress_lock:
+            if self._launch_status.get("state") != "launching":
+                return
+            status = dict(self._launch_status)
+            status.update(fields)
+            self._launch_status = status
+
+    def _progress_callback(self):
+        """CallbackDict compatible con lo que espera minecraft_launcher_lib."""
+        # Marcas del callback: si la fase actual tiene nombre ("Descargando
+        # librerías"), un status por archivo no debe pisarla.
+        flags = {"named_phase": False}
+
+        def set_status(text):
+            text = str(text)
+            label = self._PHASE_LABELS.get(text)
+            if label is None and text.startswith("Download "):
+                # download_file() pone el nombre del archivo en cada descarga: en la
+                # barra interesa la fase, no un nombre que cambia decenas de veces
+                # por segundo. Solo se usa si no hay una fase mejor que enseñar.
+                if flags["named_phase"]:
+                    return
+                flags["named_phase"] = False
+                return self._publish(phase="Descargando archivos")
+            flags["named_phase"] = True
+            # Fase nueva sin contador propio todavía (instalador de Fabric, Java,
+            # compilar el mod...): la barra pasa a barrido indeterminado en lugar de
+            # quedarse con el porcentaje de la fase anterior. Las fases que sí
+            # cuentan mandan su setMax justo después de este setStatus.
+            self._publish(phase=label or text, progress=0, max=0)
+
+        def set_max(value):
+            try:
+                maximum = max(0, int(value))
+            except (TypeError, ValueError):
+                return
+            # Cada fase reinicia la cuenta (la librería llama setMax al empezar);
+            # sobre la marcha, un máximo nuevo empieza en 0 en lugar de heredar
+            # el porcentaje de la fase anterior.
+            self._publish(max=maximum, progress=0)
+
+        def set_progress(value):
+            try:
+                progress = max(0, int(value))
+            except (TypeError, ValueError):
+                return
+            self._publish(progress=progress)
+
+        return {"setStatus": set_status, "setMax": set_max, "setProgress": set_progress}
 
     def launch(self):
-        self._launch_status["state"] = "launching"
-        threading.Thread(target=self._detect_java, daemon=True).start()
+        if self._launch_status.get("state") in ("launching", "playing"):
+            return {"ok": False, "error": "Minecraft ya se está ejecutando"}
+
+        try:
+            plan = minecraft.launch_plan()
+        except Exception as e:
+            logger.warning(f"launch_plan failed: {e}")
+            plan = {}
+        self._launch_status = {
+            "state": "launching",
+            "needs_download": bool(plan.get("needs_download")),
+            "phase": "Preparando el arranque",
+            "progress": 0,
+            "max": 0,
+        }
+        callback = self._progress_callback()
+
         def run():
-            s = minecraft.load_settings()
-            instance = self.get_current_instance()
-            if instance:
-                s["version"] = instance.get("version", s["version"])
-                s["ram"] = instance.get("ram", s.get("ram", 4))
-                s["java_path"] = instance.get("java_path", s.get("java_path", "java"))
-                s["minecraft_dir"] = instance.get("minecraft_dir", s.get("minecraft_dir", os.path.expanduser("~/.stellaclient")))
-                minecraft.save_settings(s)
-                inst_mods = instance.get("mods_dir")
-                if inst_mods:
-                    os.environ["STELLA_MODS_DIR"] = inst_mods
-            mods.install_stella_mod()
-            if s.get("discord_rpc", True):
-                discord_rpc.update_playing()
-            minecraft.launch_minecraft()
-            if s.get("discord_rpc", True):
+            settings = {}
+            try:
+                settings = minecraft.load_settings()
+                instance = self.get_current_instance()
+                if instance:
+                    settings["version"] = instance.get("version", settings.get("version", "1.21.11"))
+                    settings["ram"] = instance.get("ram", settings.get("ram", 4))
+                    settings["java_path"] = instance.get("java_path", settings.get("java_path", "java"))
+                    settings["minecraft_dir"] = instance.get("minecraft_dir", settings.get("minecraft_dir", os.path.expanduser("~/.stellaclient")))
+                    minecraft.save_settings(settings)
+                    inst_mods = instance.get("mods_dir")
+                    if inst_mods:
+                        os.environ["STELLA_MODS_DIR"] = inst_mods
+                self._publish(phase="Preparando el mod Stella")
+                mods.install_stella_mod()
+                process = minecraft.launch_minecraft(callback=callback)
+                self._launch_status = {"state": "playing", "pid": process.pid}
+                if settings.get("discord_rpc", True):
+                    discord_rpc.update_playing()
+                process.wait()
+            except Exception as e:
+                logger.exception("Launch failed")
+                self._launch_status = {"state": "error", "message": str(e)}
+                return
+            if settings.get("discord_rpc", True):
                 discord_rpc.update_menu()
-            self._launch_status["state"] = "stopped"
+            self._launch_status = {"state": "stopped"}
+
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True}
 
-    def install_stella_mod(self):
-        result = mods.install_stella_mod()
-        if result:
-            self._clear_browse_cache()
-            return {"ok": True, "path": result}
-        return {"ok": False, "error": "Failed to build/install Stella mod"}
-
     def get_launch_status(self):
-        return self._launch_status
+        return dict(self._launch_status)
 
-    def get_trending_mods(self, project_type="mod", offset=0):
+    def get_trending_mods(self, project_type="mod", offset=0, sort="downloads"):
         try:
-            version = minecraft.load_settings().get("version", "1.21.1")
-            key = f"trending_{project_type}_{version}_{offset}"
+            instance = self.get_current_instance()
+            version = (instance or {}).get("version") or minecraft.load_settings().get("version", "1.21.1")
+            key = f"trending_{project_type}_{version}_{offset}_{sort}"
             def _fetch():
-                data = mods.get_trending_mods(version=version, limit=15, project_type=project_type, offset=offset)
-                return {"mods": data["results"], "total_hits": data["total_hits"]}
+                data = mods.get_trending_mods(version=version, limit=15, project_type=project_type, offset=offset, sort=sort)
+                result = {"mods": data["results"], "total_hits": data["total_hits"]}
+                if data.get("error"):
+                    result["error"] = data["error"]
+                return result
             return _cached(key, _CACHE_TTL, _fetch)
         except Exception as e:
             return {"error": str(e), "mods": [], "total_hits": 0}
 
-    def search_mods(self, query, version, source="modrinth", project_type="mod", offset=0):
+    def search_mods(self, query, version, source="modrinth", project_type="mod", offset=0, sort="downloads"):
         try:
-            if source == "modrinth":
-                key = f"search_{project_type}_{version}_{query}_{offset}"
-                def _fetch():
-                    data = mods.search_modrinth(query, version=version, project_type=project_type, offset=offset)
-                    return {"mods": data["results"], "total_hits": data["total_hits"]}
-                return _cached(key, _CACHE_TTL, _fetch)
-            return {"mods": mods.search_forge(version), "total_hits": 0}
+            if source != "modrinth":
+                return {"error": "Forge no está soportado todavía", "mods": [], "total_hits": 0}
+            key = f"search_{project_type}_{version}_{query}_{offset}_{sort}"
+            def _fetch():
+                data = mods.search_modrinth(query, version=version, project_type=project_type, offset=offset, sort=sort)
+                result = {"mods": data["results"], "total_hits": data["total_hits"]}
+                if data.get("error"):
+                    result["error"] = data["error"]
+                return result
+            return _cached(key, _CACHE_TTL, _fetch)
         except Exception as e:
             return {"error": str(e), "mods": [], "total_hits": 0}
 
@@ -359,6 +436,11 @@ class API:
                 resp = requests.get(f"https://api.modrinth.com/v2/project/{mod_id}", timeout=10)
                 if resp.status_code == 200:
                     d = resp.json()
+                    license_raw = d.get("license")
+                    if isinstance(license_raw, dict):
+                        license_name = license_raw.get("name") or license_raw.get("id") or ""
+                    else:
+                        license_name = license_raw or ""
                     return {
                         "mod_id": mod_id,
                         "slug": d.get("slug", ""),
@@ -372,7 +454,7 @@ class API:
                         "additional_categories": d.get("additional_categories", []),
                         "client_side": d.get("client_side", ""),
                         "server_side": d.get("server_side", ""),
-                        "license": d.get("license", ""),
+                        "license": license_name,
                         "game_versions": d.get("game_versions", []),
                         "loaders": d.get("loaders", []),
                         "published": d.get("published", ""),
@@ -396,33 +478,86 @@ class API:
 
     def download_mod(self, mod_id, mc_version, source="modrinth", project_type="mod", thumbnail="", prefer_loader="fabric"):
         self._ensure_mods_env()
-        self._clear_browse_cache()
-        if source == "modrinth":
-            mods.download_mod(mod_id, mc_version, source=source, project_type=project_type, thumbnail=thumbnail, prefer_loader=prefer_loader)
-        else:
-            mods.download_forge(mc_version)
+        if source != "modrinth":
+            return {"ok": False, "error": "Forge no está soportado todavía"}
+        result = mods.download_mod(mod_id, mc_version, source=source, project_type=project_type, thumbnail=thumbnail, prefer_loader=prefer_loader)
+        if result.get("ok"):
+            self._clear_browse_cache()
+        return result
 
     def minimize(self):
         if hasattr(self, '_window'):
             self._window.minimize()
         return {"ok": True}
 
-    def maximize(self):
-        if hasattr(self, '_window'):
-            self._window.maximize()
-        return {"ok": True}
+    _maximized = True  # main.py crea la ventana maximizada
+
+    def toggle_maximize(self):
+        """El botón □ alterna maximizado/restaurado: pywebview no lo hace solo."""
+        if not hasattr(self, '_window') or not self._window:
+            return {"ok": False}
+        try:
+            native = getattr(self._window, 'native', None)
+            if native is not None and hasattr(native, 'is_maximized'):
+                self._maximized = bool(native.is_maximized())
+            if self._maximized:
+                self._window.restore()
+            else:
+                self._window.maximize()
+            self._maximized = not self._maximized
+            return {"ok": True, "maximized": self._maximized}
+        except Exception as e:
+            logger.info(f"toggle_maximize failed: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def copy_to_clipboard(self, text):
+        """Copia texto al portapapeles del sistema.
+
+        WebKitGTK no siempre permite el portapapeles desde JS (necesita permisos
+        que pywebview no pide), así que el camino fiable es GTK. Si la llamada
+        llega desde otro hilo se encola en el principal con `idle_add`, que es el
+        único donde GTK es seguro.
+        """
+        if not isinstance(text, str) or not text:
+            return False
+        try:
+            import gi
+            gi.require_version("Gtk", "3.0")
+            gi.require_version("Gdk", "3.0")
+            from gi.repository import Gdk, GLib, Gtk
+        except Exception as e:
+            logger.info(f"copy_to_clipboard sin GTK disponible: {e}")
+            return False
+
+        def _do_copy():
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, -1)
+            # Sin store() el contenido se pierde al cerrar la app.
+            clipboard.store()
+
+        try:
+            # En el hilo principal GTK es seguro y podemos devolver el resultado
+            # real. Si pywebview llama desde otro hilo, se encola en el principal.
+            if GLib.MainContext.default().is_owner():
+                _do_copy()
+                return True
+
+            def _idle_copy():
+                try:
+                    _do_copy()
+                except Exception as e:
+                    logger.info(f"copy_to_clipboard falló: {e}")
+                return False  # no repetir
+
+            GLib.idle_add(_idle_copy)
+            return True
+        except Exception as e:
+            logger.info(f"copy_to_clipboard falló: {e}")
+            return False
 
     def close_window(self):
         if hasattr(self, '_window'):
             self._window.destroy()
-        return {"ok": True}
-
-    def move_window(self, x, y):
-        try:
-            if hasattr(self, '_window'):
-                self._window.move(x, y)
-        except Exception:
-            pass
         return {"ok": True}
 
     def begin_window_move(self, button, root_x, root_y, timestamp):
@@ -458,6 +593,6 @@ class API:
 
     def delete_mod(self, filename):
         self._ensure_mods_env()
-        mods.delete_mod(filename)
+        ok = mods.delete_mod(filename)
         self._clear_browse_cache()
-        return {"ok": True}
+        return {"ok": ok}

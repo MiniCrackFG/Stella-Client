@@ -1,0 +1,52 @@
+# Plantilla del spec de RPM. rpm.sh sustituye @VERSION@ y las líneas @REQUIRES@
+# (que salen de build/requires-rpm.txt, medido con ldd sobre el payload) y le pasa
+# el árbol ya montado en la macro _payload. Así el layout lo define un único
+# fichero, packaging/files.sh, y no hay forma de que el .rpm y el .deb acaben con
+# árboles distintos.
+
+# Sin esto, rpmbuild intenta generar subpaquetes debuginfo vacíos.
+%global debug_package %{nil}
+%define _build_id_links none
+
+Name:           stella-client
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Launcher de Minecraft con soporte de mods Fabric
+
+License:        MIT
+URL:            https://github.com/MiniCrackFG/Stella-Client
+BuildArch:      x86_64
+
+# IMPRESCINDIBLE. rpmbuild genera dependencias automáticas escaneando los
+# binarios, y en este paquete eso significa pedirle a la distro que proporcione
+# los .so que el propio paquete lleva dentro (incluido libpython): el RPM se
+# vuelve ininstalable. Con AutoReqProv desactivado, las dependencias son
+# exactamente las que están listadas abajo y que la auditoría ha medido.
+AutoReqProv:    no
+
+@REQUIRES@
+
+%description
+Launcher de Minecraft para Linux con soporte de mods Fabric, multiples
+instancias, Discord Rich Presence y autenticacion de Microsoft.
+
+Incluye su propio interprete de Python y deja GTK y WebKitGTK a la distro, asi
+que funciona en cualquier distribucion moderna sin fijar su version.
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}
+cp -a %{_payload}/. %{buildroot}/
+
+%files
+# Estas rutas las produce packaging/files.sh; si allí cambian, aquí también.
+/usr/bin/stella-client
+/usr/lib/stella-client
+/usr/share/applications/stella-client.desktop
+/usr/share/icons/hicolor/64x64/apps/stella-client.png
+/usr/share/icons/hicolor/128x128/apps/stella-client.png
+/usr/share/icons/hicolor/256x256/apps/stella-client.png
+/usr/share/icons/hicolor/512x512/apps/stella-client.png
+%license /usr/share/licenses/stella-client/LICENSE
+
+%changelog

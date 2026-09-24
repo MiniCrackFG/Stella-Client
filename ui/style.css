@@ -21,20 +21,46 @@
   font-display: swap;
   src: url('../assets/fonts/ComicNeue-Bold.ttf') format('truetype');
 }
+/* Los títulos usan 800: sin esta cara el motor tendría que engrosar la negrita
+   por su cuenta ("faux bold"), que es justo lo que emborrona las letras. */
+@font-face {
+  font-family: 'Comic Neue';
+  font-style: normal;
+  font-weight: 800 900;
+  font-display: swap;
+  src: url('../assets/fonts/ComicNeue-Bold.ttf') format('truetype');
+}
 
-/* Splash */
+/* Splash — invisible por defecto: si el JS no arranca, nunca tapa la interfaz */
 #splash {
   position: fixed; inset: 0; z-index: 99999;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   gap: 16px;
+  background: rgba(10,10,10,0);
+  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .4s ease, background .4s ease, backdrop-filter .4s ease, -webkit-backdrop-filter .4s ease, visibility 0s linear .4s;
+}
+#splash.show {
   background: rgba(10,10,10,.75);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  pointer-events: none;
-}
-#splash.show {
+  opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+  transition: opacity .3s ease, background .3s ease, backdrop-filter .3s ease, -webkit-backdrop-filter .3s ease, visibility 0s;
+}
+#splash.hide {
+  background: rgba(10,10,10,0);
+  -webkit-backdrop-filter: blur(0px);
+  backdrop-filter: blur(0px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 #splash .splash-logo,
 #splash .splash-title,
@@ -52,58 +78,10 @@
 #splash.show .splash-title,
 #splash.show .splash-sub,
 #splash.show .splash-loader { opacity: 1; transform: translateY(0); }
-
-#splash.hide {
-  pointer-events: none;
-  background: rgba(10,10,10,0);
-  -webkit-backdrop-filter: blur(0px);
-  backdrop-filter: blur(0px);
-  transition: background .5s ease .15s, backdrop-filter .5s ease .15s, -webkit-backdrop-filter .5s ease .15s;
-}
-#splash.hide .splash-logo { opacity: 0; transition: opacity .5s ease; transition-delay: 0s; }
-#splash.hide .splash-title { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .05s; }
-#splash.hide .splash-sub  { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .1s; }
-#splash.hide .splash-loader { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .15s; }
-
-#splash.show {
-  pointer-events: auto;
-}
-#splash .splash-star,
-#splash .splash-title,
-#splash .splash-sub,
-#splash .splash-loader {
-  opacity: 0;
-  transition: opacity .3s ease, transform .3s ease;
-}
-#splash .splash-star { animation: starSpin 2s ease-in-out .4s infinite; transition-delay: 0s; }
-#splash .splash-title { transform: translateY(16px); transition-delay: .05s; }
-#splash .splash-sub  { transform: translateY(16px); transition-delay: .1s; }
-#splash .splash-loader { transform: translateY(16px); transition-delay: .15s; }
-
-#splash.show .splash-star { opacity: 1; }
-#splash.show .splash-title,
-#splash.show .splash-sub,
-#splash.show .splash-loader { opacity: 1; transform: translateY(0); }
-
-#splash.hide {
-  pointer-events: none;
-  background: rgba(10,10,10,0);
-  -webkit-backdrop-filter: blur(0px);
-  backdrop-filter: blur(0px);
-  transition: background .5s ease .15s, backdrop-filter .5s ease .15s, -webkit-backdrop-filter .5s ease .15s;
-}
-#splash.hide .splash-star { opacity: 0; transition: opacity .5s ease; transition-delay: 0s; }
-#splash.hide .splash-title { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .05s; }
-#splash.hide .splash-sub  { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .1s; }
-#splash.hide .splash-loader { opacity: 0; transform: translateY(-10px); transition: opacity .4s ease, transform .4s ease; transition-delay: .15s; }
-.splash-star {
-  width: 56px; height: 56px;
-  filter: drop-shadow(0 0 12px rgba(168,85,247,.4));
-}
-@keyframes starSpin {
-  0%, 100% { transform: rotate(0deg) scale(1); }
-  50% { transform: rotate(180deg) scale(1.1); }
-}
+#splash.hide .splash-logo { opacity: 0; transition-delay: 0s; }
+#splash.hide .splash-title,
+#splash.hide .splash-sub,
+#splash.hide .splash-loader { opacity: 0; transform: translateY(-10px); }
 .splash-title {
   font-size: 36px; font-weight: 800;
   letter-spacing: 2px;
@@ -139,8 +117,10 @@
   --bg2: #0a0720;
   --card: #110d2a;
   --border: #1e1850;
-  --text: #e2dff5;
-  --text2: #7a72b0;
+  --text: #e8e5fa;
+  /* Un gris textual demasiado apagado sobre fondo oscuro se percibe borroso:
+     mejor contraste = letras más nítidas. */
+  --text2: #9e97d2;
   --accent: #a855f7;
   --accent-hover: #c084fc;
   --danger: #ef4444;
@@ -150,17 +130,21 @@
   --content-bg: rgba(5, 3, 15, 0.4);
   --input-bg: rgba(17, 13, 42, 0.9);
   --badge-bg: rgba(5, 3, 15, 0.4);
+  /* Color de los paneles (barra de título y barra lateral). Translúcido: el
+     fondo de estrellas vive detrás de la interfaz y se sigue viendo. */
+  --panel: rgba(10, 7, 32, 0.82);
 }
 .theme-light {
   --bg: #ffffff;
   --bg2: #f5f5f5;
   --card: #ffffff;
   --border: #e0e0e0;
-  --text: #1a1a1a;
-  --text2: #888888;
+  --text: #17171a;
+  --text2: #6d6d74;
   --content-bg: rgba(255, 255, 255, 0.85);
   --input-bg: rgba(245, 245, 245, 0.95);
   --badge-bg: rgba(245, 245, 245, 0.6);
+  --panel: rgba(245, 245, 245, 0.85);
 }
 .theme-light #content {
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -183,6 +167,7 @@ body.theme-light #stars span {
   --content-bg: rgba(0, 0, 0, 0.95);
   --input-bg: rgba(0, 0, 0, 0.9);
   --badge-bg: rgba(0, 0, 0, 0.5);
+  --panel: rgba(0, 0, 0, 0.8);
 }
 body {
   font-family: 'Comic Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -204,56 +189,41 @@ body::before {
   z-index: 0;
 }
 #stars {
-  position: fixed; inset: 0; pointer-events: none; z-index: 2;
+  /* Detrás de la interfaz (#app usa z-index 1). Si el canvas queda por encima,
+     WebKit tiene que componerlo sobre TODO el texto: pierde el antialiasing de
+     subpíxel y las letras se ven blandas. */
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
   overflow: hidden;
 }
-.shooting-star::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 60px;
-  height: 1px;
-  background: linear-gradient(to left, rgba(255,255,255,0.8), transparent);
-  right: 100%;
+/* Ajustes → Appearance: 'Smooth Rendering' desactivado.
+   Se quitan animaciones y transiciones; el fondo de estrellas lo deja estático el JS. */
+body.no-smooth *,
+body.no-smooth *::before,
+body.no-smooth *::after {
+  animation: none !important;
+  transition: none !important;
 }
 #app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
 #app-body {
   display: flex; flex: 1; overflow: hidden;
   position: relative;
-  background: var(--bg2);
+  /* Sin fondo: así el recuadro de contenido deja pasar el fondo animado. */
+  background: transparent;
 }
-#app-body::before,
-#app-body::after {
-  content: '';
-  position: absolute;
-  left: var(--sidebar-w);
-  width: 24px;
-  height: 24px;
-  background: var(--bg2);
-  z-index: -1;
-}
-#app-body::before {
-  top: 0;
-  border-bottom-right-radius: 24px;
-}
-#app-body::after {
-  bottom: 0;
-  border-top-right-radius: 24px;
-}
+/* Los rellenos ::before/::after servían para tapar la costura entre la barra
+   lateral opaca y las esquinas redondeadas del contenido. Ahora los paneles son
+   translúcidos y el fondo se ve detrás, así que solo quedarían como manchas
+   opacas sobre el fondo animado. */
 #titlebar {
   display: flex; align-items: center; justify-content: space-between;
   height: 38px; flex-shrink: 0;
-  background: var(--bg2);
+  background: var(--panel);
   user-select: none;
 }
 #drag-region {
   flex: 1; height: 100%; display: flex; align-items: center;
   padding: 0 14px; font-size: 14px; font-weight: 600;
   cursor: default;
-}
-.sc-ste, .sc-lla, .sc-cli, .sc-ent {
-  display: inline-block;
 }
 #drag-region {
   background: linear-gradient(90deg, #a855f7, #3b82f6, #ec4899, #06b6d4, #a855f7, #3b82f6, #ec4899, #06b6d4);
@@ -265,6 +235,27 @@ body::before {
 @keyframes slideRight {
   0% { background-position: 200% 50%; }
   100% { background-position: 0% 50%; }
+}
+/* Red de seguridad del degradado: un hijo que crea su propia capa de pintura
+   (display:inline-block, transform, opacity, filter...) deja de heredar el
+   recorte del padre, así que `-webkit-text-fill-color: transparent` sigue
+   aplicándose pero ya no hay fondo detrás: sus letras se quedan apagadas y sin
+   animación. Si alguna vez se envuelve parte del texto, aquí recupera el
+   degradado animado. */
+#drag-region > :not(svg),
+.hero h1 > :not(svg),
+.splash-title > :not(svg),
+#version-current > :not(svg),
+.badge-grad > :not(svg),
+.version-card:hover .major > :not(svg),
+.instance-card:hover .iname > :not(svg),
+.instance-card:hover .imeta > :not(svg) {
+  background: linear-gradient(90deg, #a855f7, #3b82f6, #ec4899, #06b6d4, #a855f7, #3b82f6, #ec4899, #06b6d4);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: slideRight 12s linear infinite;
 }
 .win-btns { display: flex; height: 100%; }
 .win-btn {
@@ -279,7 +270,7 @@ body::before {
 /* Sidebar */
 #sidebar {
   width: var(--sidebar-w);
-  background: var(--bg2);
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -560,7 +551,7 @@ select:focus { border-color: var(--accent); }
 .mod-card .mod-info { flex: 1; min-width: 0; }
 .mod-card .mod-info .name { font-weight: 600; font-size: 15px; }
 .mod-card .mod-info .desc { color: var(--text2); font-size: 13px; }
-.mod-card .mod-info .meta { color: var(--text2); font-size: 12px; margin-top: 4px; }
+.mod-card .mod-info .meta { color: var(--text2); font-size: 13px; margin-top: 4px; }
 .mod-card .btn-sm {
   padding: 10px 18px;
   border-radius: 8px;
@@ -655,13 +646,45 @@ select:focus { border-color: var(--accent); }
 .msg.error { background: rgba(196, 43, 28, 0.12); color: #ef5350; }
 .msg.info { background: rgba(168, 85, 247, 0.12); color: var(--accent); }
 
+/* Código de inicio de sesión de Microsoft */
+.ms-login { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.ms-code-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ms-code {
+  font-family: ui-monospace, 'DejaVu Sans Mono', 'Noto Sans Mono', 'Consolas', monospace;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px dashed rgba(168, 85, 247, 0.5);
+  border-radius: 10px;
+  padding: 6px 16px 6px 20px;
+  cursor: pointer;
+  user-select: all;
+  transition: border-color .15s, background .15s;
+}
+.ms-code:hover { border-color: var(--accent); background: rgba(168, 85, 247, 0.12); }
+.btn-copy {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.btn-copy:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Mod Detail Overlay */
 .overlay {
   display: none;
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.7);
-  z-index: 1000;
+  /* por encima de la luna arrastrable (9998), por debajo del splash */
+  z-index: 11000;
   align-items: center;
   justify-content: center;
 }
@@ -881,6 +904,92 @@ select:focus { border-color: var(--accent); }
 }
 .instance-card .idel:hover { background: rgba(196,43,28,0.1); }
 
+/* Barra de descarga inferior (arranque del juego)
+   Comparte el lenguaje visual del launcher: panel translúcido, radio propio y
+   el degradado animado de la marca en el relleno y en el porcentaje. */
+.launch-progress {
+  flex-shrink: 0;
+  background: var(--panel);
+  /* Transparente cerrada: si no, quedaría una línea de 1px al pie de la ventana */
+  border-top: 1px solid transparent;
+  transition: max-height .28s cubic-bezier(0.34, 1.2, 0.64, 1), opacity .22s ease, padding .28s ease, border-color .22s ease;
+  /* Cerrada no ocupa nada: así no hay salto de layout al aparecer */
+  max-height: 0;
+  padding: 0 22px;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height .28s cubic-bezier(0.34, 1.2, 0.64, 1), opacity .22s ease, padding .28s ease;
+}
+.launch-progress.show {
+  max-height: 96px;
+  padding: 12px 22px 14px;
+  opacity: 1;
+  border-top-color: var(--border);
+}
+.lp-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+.lp-dot {
+  width: 8px; height: 8px; flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: lpPulse 1s ease-in-out infinite alternate;
+}
+@keyframes lpPulse {
+  from { opacity: .35; transform: scale(.75); }
+  to   { opacity: 1;   transform: scale(1); }
+}
+#lp-label { font-weight: 600; color: var(--text); }
+.lp-pct {
+  margin-left: auto;
+  font-weight: 800;
+  font-size: 14px;
+  min-width: 46px;
+  text-align: right;
+  /* Cifras de ancho fijo: el número no baila al ir cambiando */
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(90deg, #a855f7, #3b82f6, #ec4899, #06b6d4, #a855f7, #3b82f6, #ec4899, #06b6d4);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: slideRight 12s linear infinite;
+}
+.lp-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--badge-bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.lp-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #a855f7, #3b82f6, #ec4899, #06b6d4, #a855f7, #3b82f6, #ec4899, #06b6d4);
+  background-size: 300% 100%;
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.55);
+  animation: slideRight 12s linear infinite;
+  transition: width .3s ease;
+}
+/* Sin máximo todavía (compilando el mod, lanzando el instalador de Fabric...):
+   en lugar de mentir con un porcentaje, la barra barre de lado a lado. */
+.lp-fill.indeterminate {
+  width: 34%;
+  transition: none;
+  animation: lpSweep 1.15s ease-in-out infinite;
+}
+@keyframes lpSweep {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
 /* Toast */
 .toast {
   position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -890,6 +999,8 @@ select:focus { border-color: var(--accent); }
   background: var(--card); border: 1px solid var(--border); color: var(--text);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* Con la barra de descarga abierta, el toast sube para no taparla */
+body.launch-bar-visible .toast { bottom: 92px; }
 .toast-info { border-color: var(--accent); }
 .toast-success { border-color: var(--success); }
 .toast-error { border-color: var(--danger); }

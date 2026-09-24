@@ -2,6 +2,60 @@ import logging
 import os
 import sys
 import threading
+import time
+
+
+def _drop_bundled_gui_paths():
+    """Retira las variables con las que PyInstaller apunta la pila gráfica al bundle.
+
+    PyInstaller da por hecho que una aplicación con `gi` empaqueta GTK, así que sus
+    runtime hooks apuntan GI_TYPELIB_PATH, GTK_PATH, GDK_PIXBUF_MODULE_FILE y
+    XDG_DATA_DIRS a `sys._MEIPASS`. Aquí GTK y WebKitGTK los pone la distro a
+    propósito —empaquetarlos congelaría su versión y la glibc de la máquina donde
+    se compiló—, y esas variables dejarían al programa buscando en directorios que
+    el paquete no lleva.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle:
+        return  # sin congelar no hay nada que deshacer
+    bundle = os.path.abspath(bundle)
+
+    def _is_bundled(value):
+        value = os.path.abspath(value)
+        return value == bundle or value.startswith(bundle + os.sep)
+
+    for var in (
+        "GI_TYPELIB_PATH",
+        "GTK_DATA_PREFIX",
+        "GTK_EXE_PREFIX",
+        "GTK_PATH",
+        "GTK_MODULES",
+        "PANGO_LIBDIR",
+        "PANGO_SYSCONFDIR",
+        "GDK_PIXBUF_MODULE_FILE",
+        "GDK_PIXBUF_MODULEDIR",
+        "GIO_MODULE_DIR",
+        "GSETTINGS_SCHEMA_DIR",
+    ):
+        value = os.environ.get(var)
+        if value and _is_bundled(value):
+            os.environ.pop(var, None)
+
+    # XDG_DATA_DIRS es una lista: se quita sólo la entrada del bundle, para no
+    # arrastrar con ella las rutas del sistema.
+    entries = [e for e in os.environ.get("XDG_DATA_DIRS", "").split(os.pathsep) if e]
+    if entries:
+        remaining = [e for e in entries if not _is_bundled(e)]
+        if remaining:
+            os.environ["XDG_DATA_DIRS"] = os.pathsep.join(remaining)
+        else:
+            os.environ.pop("XDG_DATA_DIRS", None)
+
+
+# Antes de importar webview a propósito: pywebview carga su backend GTK y las
+# variables tienen que estar ya en su sitio.
+_drop_bundled_gui_paths()
+
 import webview
 
 import launcher.discord_rpc as discord_rpc
@@ -111,5 +165,112 @@ def start_ui():
     webview.start(debug=False, func=lambda: set_window_icon(window))
 
 
+# --- Comprobación del entorno (--check) ---------------------------------
+
+_DISPLAY_VARS = ("DISPLAY", "WAYLAND_DISPLAY")
+
+# Librerías gráficas cuyo origen conviene poder citar al verificar un paquete.
+_CHECK_LIBS = ("libgtk-3", "libwebkit2gtk", "libglib-2.0", "libgirepository-")
+
+
+def _loaded_library_paths(prefixes):
+    """Rutas de las librerías realmente cargadas, leídas de `/proc/self/maps`."""
+    found = {}
+    try:
+        with open("/proc/self/maps", "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if " /" not in line:
+                    continue
+                path = "/" + line.rstrip("\n").split(" /", 1)[1]
+                name = os.path.basename(path)
+                for prefix in prefixes:
+                    if name.startswith(prefix):
+                        found.setdefault(prefix, path)
+    except OSError:
+        pass
+    return found
+
+
+def check_environment():
+    """Comprueba que el binario puede arrancar en este sistema y devuelve el código de salida.
+
+    Existe para poder verificar los paquetes en otras distros sin pantalla: carga los
+    typelibs de GTK y WebKitGTK, informa de dónde sale cada librería —el diseño del
+    paquete es que las ponga la distro, así que verlas dentro del bundle sería un aviso—
+    y, si hay pantalla, llega a crear y cerrar la ventana de verdad.
+    """
+    bundle = getattr(sys, "_MEIPASS", "") or ""
+    print("stella-client — comprobación del entorno")
+    print(f"  ejecutable : {sys.executable}")
+    print(f"  python     : {sys.version.split()[0]}")
+    if bundle:
+        print(f"  bundle     : {bundle}")
+
+    try:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("WebKit2", "4.1")
+        from gi.repository import GLib, Gtk, WebKit2
+
+        print(f"  PyGObject  : {gi.__version__}")
+        print(f"  GLib       : {GLib.MAJOR_VERSION}.{GLib.MINOR_VERSION}.{GLib.MICRO_VERSION}")
+        print(f"  GTK        : {Gtk.MAJOR_VERSION}.{Gtk.MINOR_VERSION}.{Gtk.MICRO_VERSION}")
+        print(
+            "  WebKitGTK  : "
+            f"{WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()}"
+        )
+    except Exception as e:
+        print(f"  FALLO al cargar GTK/WebKitGTK: {e}")
+        print("RESULTADO: este sistema no tiene lo necesario para arrancar")
+        return 1
+
+    bundled = []
+    for prefix, path in sorted(_loaded_library_paths(_CHECK_LIBS).items()):
+        inside = bool(bundle) and os.path.abspath(path).startswith(os.path.abspath(bundle))
+        if inside:
+            bundled.append(prefix)
+        print(f"  {prefix:<14} {'[EN EL BUNDLE] ' if inside else ''}{path}")
+    if bundled:
+        print(
+            "  AVISO: van dentro del paquete " + ", ".join(bundled)
+            + "; deberían venir de la distro para no fijar su versión"
+        )
+
+    display = next(((v, os.environ[v]) for v in _DISPLAY_VARS if os.environ.get(v)), None)
+    if not display:
+        print("  pantalla   : sin DISPLAY ni WAYLAND_DISPLAY; no se crea la ventana")
+        print("RESULTADO: las librerías gráficas cargan correctamente")
+        return 0
+
+    print(f"  pantalla   : {display[0]}={display[1]}")
+    # Si WebKit se cuelga, el vigilante lo convierte en un código de salida claro
+    # en vez de dejar el proceso vivo para siempre.
+    watchdog = threading.Timer(60, os._exit, [124])
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        window = webview.create_window(
+            "Stella Client (check)", html="<html><body>ok</body></html>", hidden=True
+        )
+
+        def _close_after_start():
+            time.sleep(1.5)
+            window.destroy()
+
+        webview.start(debug=False, func=_close_after_start)
+    except Exception as e:
+        print(f"  FALLO al crear la ventana: {e}")
+        print("RESULTADO: GTK carga pero la ventana no se pudo abrir")
+        return 1
+    finally:
+        watchdog.cancel()
+
+    print("RESULTADO: la ventana se creó y se cerró correctamente")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--check" in sys.argv[1:]:
+        sys.exit(check_environment())
     start_ui()
