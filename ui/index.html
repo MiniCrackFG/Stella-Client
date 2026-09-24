@@ -16,7 +16,7 @@
     <p class="splash-sub">Minecraft Launcher</p>
     <div class="splash-loader"><span></span><span></span><span></span></div>
   </div>
-  <div id="stars"></div>
+  <canvas id="stars"></canvas>
   <div id="app">
     <div id="titlebar">
       <span id="drag-region" class="pywebview-drag-region"><span class="sc-ste">Ste</span><span class="sc-lla">lla</span> <span class="sc-cli">Cli</span><span class="sc-ent">ent</span></span>
@@ -176,6 +176,13 @@
             <label>Smooth Rendering</label>
             <label class="switch">
               <input type="checkbox" id="smooth-rendering" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-group">
+            <label>Hardware Acceleration</label>
+            <label class="switch">
+              <input type="checkbox" id="hw-accel" checked />
               <span class="slider"></span>
             </label>
           </div>

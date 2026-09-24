@@ -1,20 +1,158 @@
+window.shootingStars = [];
+
 function createStars() {
-  const container = document.getElementById('stars');
-  if (!container) return;
-  for (let i = 0; i < 300; i++) {
-    const s = document.createElement('span');
-    s.style.left = Math.random() * 100 + '%';
-    s.style.top = Math.random() * 100 + '%';
-    s.style.setProperty('--d', (2 + Math.random() * 3) + 's');
-    s.style.setProperty('--a', (0.5 + Math.random() * 0.5));
-    s.style.setProperty('--drift', (3 + Math.random() * 3) + 's');
-    s.style.setProperty('--dx', ((Math.random() - 0.5) * 40) + 'px');
-    s.style.setProperty('--dy', ((Math.random() - 0.5) * 40) + 'px');
-    const size = 2 + Math.random() * 3;
-    s.style.width = size + 'px';
-    s.style.height = size + 'px';
-    container.appendChild(s);
+  const canvas = document.getElementById('stars');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+  canvas.width = width;
+  canvas.height = height;
+
+  window.addEventListener('resize', () => {
+    const oldW = width || 1;
+    const oldH = height || 1;
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    stars.forEach(s => {
+      s.x = (s.x / oldW) * width;
+      s.y = (s.y / oldH) * height;
+    });
+  });
+
+  const stars = [];
+  for (let i = 0; i < 200; i++) {
+    stars.push({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      size: 1 + Math.random() * 2,
+      baseAlpha: 0.3 + Math.random() * 0.5,
+      blinkSpeed: 0.005 + Math.random() * 0.015,
+      angle: Math.random() * Math.PI * 2,
+      driftX: (Math.random() - 0.5) * 0.2,
+      driftY: (Math.random() - 0.5) * 0.2,
+    });
   }
+
+  function draw(ts) {
+    ctx.clearRect(0, 0, width, height);
+    const isLight = document.body.classList.contains('theme-light');
+    ctx.fillStyle = isLight ? '#7c5cbf' : '#ffffff';
+
+    stars.forEach(s => {
+      s.angle += s.blinkSpeed;
+      s.x += s.driftX;
+      s.y += s.driftY;
+      
+      if (s.x < 0) s.x = width;
+      if (s.x > width) s.x = 0;
+      if (s.y < 0) s.y = height;
+      if (s.y > height) s.y = 0;
+
+      const alpha = s.baseAlpha + Math.sin(s.angle) * 0.3;
+      ctx.globalAlpha = Math.max(0.1, Math.min(1, alpha));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw shooting stars
+    for (let i = window.shootingStars.length - 1; i >= 0; i--) {
+      const ss = window.shootingStars[i];
+      if (!ss.startTime) ss.startTime = ts;
+      const elapsed = (ts - ss.startTime) / 1000;
+      const progress = Math.min(elapsed / ss.duration, 1);
+      
+      const x = ss.startX + ss.dx * progress;
+      const y = ss.startY + ss.dy * progress;
+
+      // Draw Trail Particles
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = isLight ? 'rgba(150,100,255,0.3)' : 'rgba(168,85,247,0.5)';
+      ss.trail.forEach(p => {
+        const pElapsed = Math.max(0, progress - p.delay);
+        if (pElapsed > 0) {
+          const pProgress = pElapsed / 0.25;
+          const fade = 1 - pProgress;
+          if (fade > 0) {
+            ctx.globalAlpha = fade * 0.9;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(x + p.ox * pProgress - 16, y + p.oy * pProgress - 16, p.size / 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      });
+      ctx.globalAlpha = 1;
+
+      // Draw Head (SVG Star)
+      if (progress < 0.7) {
+        ctx.save();
+        ctx.translate(x, y);
+        // rotate based on time
+        ctx.rotate((elapsed * 360 / (ss.duration * 0.4)) * Math.PI / 180);
+        ctx.translate(-16, -16); // offset by half SVG size (32/2)
+        
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = ss.glowColor;
+        
+        ctx.strokeStyle = ss.color;
+        ctx.lineWidth = 1.5;
+        
+        const starPath = new Path2D('M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z');
+        ctx.stroke(starPath);
+        
+        ctx.restore();
+      }
+
+      // Explosion
+      if (progress >= 0.7) {
+        if (!ss.exploded) {
+          ss.exploded = true;
+          ss.explosion = [];
+          for (let p = 0; p < 35; p++) {
+            const angle = Math.random() * 2 * Math.PI;
+            const speed = 60 + Math.random() * 100;
+            ss.explosion.push({
+              x: x, y: y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              color: ss.explColors[Math.floor(Math.random() * ss.explColors.length)],
+              size: 3 + Math.random() * 5
+            });
+          }
+        }
+        
+        const epElapsed = (progress - 0.7) / 0.3;
+        const fade = 1 - epElapsed;
+        if (fade > 0) {
+          ctx.shadowBlur = 6;
+          ctx.shadowColor = isLight ? 'rgba(150,100,255,0.4)' : 'rgba(168,85,247,0.6)';
+          ss.explosion.forEach(ep => {
+            ctx.globalAlpha = fade;
+            ctx.fillStyle = ep.color;
+            ctx.beginPath();
+            ctx.arc(ep.x + ep.vx * epElapsed, ep.y + ep.vy * epElapsed, ep.size / 2, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.shadowBlur = 0; // reset
+      if (progress >= 1) {
+        window.shootingStars.splice(i, 1);
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
   const moon = document.createElement('div');
   moon.className = 'moon';
   moon.id = 'draggable-moon';
@@ -81,18 +219,20 @@ function createStars() {
   moon._isDragging = false;
   moon.addEventListener('mousedown', (e) => {
     moon._isDragging = true;
-    const rect = moon.getBoundingClientRect();
-    const ox = rect.width / 2, oy = rect.height / 2;
-    moon.style.left = (e.clientX - ox) + 'px';
-    moon.style.top = (e.clientY - oy) + 'px';
+    moon._startX = e.clientX;
+    moon._startY = e.clientY;
+    moon._startLeft = parseFloat(getComputedStyle(moon).left) || 80;
+    moon._startTop = parseFloat(getComputedStyle(moon).top) || 60;
     moon.style.cursor = 'grabbing';
     document.body.style.cursor = 'grabbing';
     e.preventDefault();
   });
   document.addEventListener('mousemove', (e) => {
     if (!moon._isDragging) return;
-    moon.style.left = (e.clientX - moon.offsetWidth / 2) + 'px';
-    moon.style.top = (e.clientY - moon.offsetHeight / 2) + 'px';
+    const dx = e.clientX - moon._startX;
+    const dy = e.clientY - moon._startY;
+    moon.style.left = (moon._startLeft + dx) + 'px';
+    moon.style.top = (moon._startTop + dy) + 'px';
     moon.style.cursor = 'grabbing';
     document.body.style.cursor = 'grabbing';
   });
@@ -117,7 +257,6 @@ function createShootingStar() {
   const glowColor = isLight ? 'rgba(200,200,255,0.6)' : 'rgba(168,85,247,0.8)';
   const trailColors = isLight ? ['#a855f7', '#c084fc', '#9333ea', '#7c3aed'] : ['#fff', '#a78bfa', '#c084fc', '#e9d5ff'];
   const explColors = isLight ? ['#7c3aed', '#a855f7', '#c084fc', '#9333ea', '#6d28d9'] : ['#fff', '#a78bfa', '#c084fc', '#e9d5ff', '#f5f3ff'];
-  const starGlow = isLight ? '0 0 12px rgba(200,200,255,0.6)' : '0 0 12px rgba(168,85,247,0.8)';
 
   const startX = 2 + Math.random() * 8;
   const startY = 2 + Math.random() * 8;
@@ -129,132 +268,33 @@ function createShootingStar() {
   const endY = vh * (0.9 + Math.random() * 0.08);
   const dx = endX - startPxX;
   const dy = endY - startPxY;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
   const duration = 1.8 + Math.random() * 0.6;
 
-  const container = document.createElement('div');
-  container.style.cssText = `position:fixed;left:${startPxX}px;top:${startPxY}px;pointer-events:none;z-index:2;`;
-  document.body.appendChild(container);
-
-  const svgNS = 'http://www.w3.org/2000/svg';
-
-  // Black outline
-  const outlineSvg = document.createElementNS(svgNS, 'svg');
-  outlineSvg.setAttribute('width', '32');
-  outlineSvg.setAttribute('height', '32');
-  outlineSvg.setAttribute('viewBox', '0 0 24 24');
-  outlineSvg.style.cssText = 'position:absolute;top:0;left:0;display:block;pointer-events:none;';
-  const outlinePath = document.createElementNS(svgNS, 'path');
-  outlinePath.setAttribute('d', 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z');
-  outlinePath.setAttribute('fill', 'rgba(0,0,0,0.5)');
-  outlinePath.setAttribute('stroke', 'none');
-  outlineSvg.appendChild(outlinePath);
-
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('width', '32');
-  svg.setAttribute('height', '32');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.style.cssText = `display:block;filter:drop-shadow(0 0 12px ${glowColor});position:absolute;top:0;left:0;`;
-  const path = document.createElementNS(svgNS, 'path');
-  path.setAttribute('d', 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', starColor);
-  path.setAttribute('stroke-width', '1.5');
-  svg.appendChild(path);
-
-  svg.style.animation = `starSpin ${duration * 0.4}s linear infinite`;
-  outlineSvg.style.animation = `starSpin ${duration * 0.4}s linear infinite`;
-  container.appendChild(outlineSvg);
-  container.appendChild(svg);
-
-  // Trail particles
+  const trail = [];
   const particleCount = 50 + Math.floor(Math.random() * 20);
-  const particles = [];
   for (let i = 0; i < particleCount; i++) {
-    const p = document.createElement('div');
-    const size = 2 + Math.random() * 3;
-    const spreadX = (Math.random() - 0.5) * 35;
-    const spreadY = (Math.random() - 0.5) * 20 - 5;
-    const colors = trailColors;
-    p.style.cssText = `
-      position:absolute;width:${size}px;height:${size}px;
-      background:${colors[Math.floor(Math.random() * colors.length)]};
-      border-radius:50%;
-      pointer-events:none;opacity:0;
-      box-shadow: 0 0 4px ${isLight ? 'rgba(150,100,255,0.3)' : 'rgba(168,85,247,0.5)'};
-      top:16px;left:16px;
-    `;
-    container.appendChild(p);
-    particles.push({ el: p, ox: spreadX, oy: spreadY, delay: Math.random() * 0.15 });
+    trail.push({
+      ox: (Math.random() - 0.5) * 35,
+      oy: (Math.random() - 0.5) * 20 - 5,
+      size: 2 + Math.random() * 3,
+      delay: Math.random() * 0.15,
+      color: trailColors[Math.floor(Math.random() * trailColors.length)]
+    });
   }
 
-  let startTime = null;
-  let exploded = false;
-  let explosionParticles = [];
-
-  function animate(ts) {
-    if (!startTime) startTime = ts;
-    const elapsed = (ts - startTime) / 1000;
-    const progress = Math.min(elapsed / duration, 1);
-
-    const x = dx * progress;
-    const y = dy * progress;
-    container.style.transform = `translate(${x}px, ${y}px)`;
-
-    // Trail
-    particles.forEach(p => {
-      const pElapsed = Math.max(0, progress - p.delay);
-      if (pElapsed <= 0) { p.el.style.opacity = '0'; return; }
-      const pProgress = pElapsed / 0.25;
-      const fade = 1 - pProgress;
-      if (fade <= 0) { p.el.style.opacity = '0'; return; }
-      p.el.style.opacity = (fade * 0.9).toFixed(2);
-      p.el.style.transform = `translate(${p.ox * pProgress}px, ${p.oy * pProgress}px)`;
-    });
-
-    // Explosion at end
-    if (progress >= 0.7 && !exploded) {
-      exploded = true;
-      svg.style.transition = 'transform 0.6s, opacity 0.8s';
-      svg.style.transform = 'scale(3)';
-      svg.style.opacity = '0';
-      outlineSvg.style.transition = 'transform 0.6s, opacity 0.8s';
-      outlineSvg.style.transform = 'scale(3)';
-      outlineSvg.style.opacity = '0';
-      for (let i = 0; i < 35; i++) {
-        const ep = document.createElement('div');
-        const size = 3 + Math.random() * 5;
-        const a = Math.random() * 2 * Math.PI;
-        const speed = 60 + Math.random() * 100;
-        const colors2 = explColors;
-        ep.style.cssText = `
-          position:absolute;width:${size}px;height:${size}px;
-          background:${colors2[Math.floor(Math.random() * colors2.length)]};
-          border-radius:50%;pointer-events:none;opacity:1;
-          box-shadow: 0 0 6px ${isLight ? 'rgba(150,100,255,0.4)' : 'rgba(168,85,247,0.6)'};
-          top:16px;left:16px;
-        `;
-        container.appendChild(ep);
-        explosionParticles.push({ el: ep, angle: a, speed: speed });
-      }
-    }
-
-    explosionParticles.forEach(ep => {
-      const epElapsed = (progress - 0.7) / 0.3;
-      if (epElapsed <= 0) return;
-      const fade = 1 - epElapsed;
-      ep.el.style.opacity = fade > 0 ? fade.toFixed(2) : '0';
-      ep.el.style.transform = `translate(${Math.cos(ep.angle) * ep.speed * epElapsed}px, ${Math.sin(ep.angle) * ep.speed * epElapsed}px)`;
-    });
-
-    if (progress < 1) {
-      requestAnimationFrame(animate);
-    } else {
-      container.remove();
-    }
-  }
-  requestAnimationFrame(animate);
+  window.shootingStars.push({
+    startX: startPxX,
+    startY: startPxY,
+    dx: dx,
+    dy: dy,
+    duration: duration,
+    size: 2 + Math.random() * 2,
+    color: starColor,
+    glowColor: glowColor,
+    explColors: explColors,
+    trail: trail,
+    exploded: false
+  });
 }
 
 function scheduleShootingStar() {
@@ -722,31 +762,6 @@ let browseOffset = 0;
 let browseQuery = '';
 const PAGE_SIZE = 15;
 
-function createFallingChar(input, char) {
-  const rect = input.getBoundingClientRect();
-  const colors = ['#a855f7', '#3b82f6', '#ec4899', '#06b6d4', '#c084fc'];
-  for (let i = 0; i < 6; i++) {
-    const el = document.createElement('span');
-    el.textContent = char;
-    el.style.cssText = `
-      position:fixed;pointer-events:none;z-index:9999;
-      font-size:${12 + Math.random() * 6}px;
-      font-weight:700;font-family:'Comic Neue',sans-serif;
-      color:${colors[Math.floor(Math.random() * colors.length)]};
-      left:${rect.left + Math.random() * rect.width}px;
-      top:${rect.top + rect.height / 2}px;
-      opacity:1;
-      transform:translateY(0);
-      transition:all ${0.5 + Math.random() * 0.3}s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    `;
-    document.body.appendChild(el);
-    requestAnimationFrame(() => {
-      el.style.transform = `translateY(${30 + Math.random() * 60}px) translateX(${(Math.random() - 0.5) * 20}px)`;
-      el.style.opacity = '0';
-    });
-    setTimeout(() => el.remove(), 1000);
-  }
-}
 
 function createTypingChar(input, char) {
   input.style.transition = 'box-shadow 0.3s ease';
@@ -1029,9 +1044,13 @@ async function initSettings() {
     document.getElementById('discord-rpc').addEventListener('change', (e) => {
       pywebview.api.save_settings(JSON.stringify({ discord_rpc: e.target.checked }));
     });
+    document.getElementById('hw-accel').checked = settings.hw_accel !== false;
+    document.getElementById('hw-accel').addEventListener('change', (e) => {
+      pywebview.api.save_settings(JSON.stringify({ hw_accel: e.target.checked }));
+      toast('Requires restart to take effect.', 'info');
+    });
   } catch (e) { console.error(e); }
 }
-
 document.getElementById('save-java-btn')?.addEventListener('click', async () => {
   try {
     await pywebview.api.save_settings(JSON.stringify({

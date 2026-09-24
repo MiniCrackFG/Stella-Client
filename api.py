@@ -206,39 +206,30 @@ class API:
         javas = []
         seen = set()
 
+        def add_java(path):
+            if not os.path.exists(path) or path in seen:
+                return
+            seen.add(path)
+            try:
+                ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
+                version_str = ver.stderr.strip()
+                version_str = version_str.split('"')[1] if '"' in version_str else version_str[:50]
+                javas.append({"path": path, "version": version_str})
+            except Exception:
+                pass
+
         for cmd in ["java", "java21", "java17"]:
             try:
                 r = subprocess.run(["which", cmd], capture_output=True, text=True, timeout=5)
                 if r.returncode == 0:
-                    path = r.stdout.strip()
-                    if path and path not in seen:
-                        seen.add(path)
-                        ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        version_str = ver.stderr.strip()
-                        if '"' in version_str:
-                            version_str = version_str.split('"')[1]
-                        else:
-                            version_str = version_str[:50]
-                        javas.append({"path": path, "version": version_str})
+                    add_java(r.stdout.strip())
             except Exception:
                 pass
 
         import glob
         for jdir in sorted(glob.glob("/usr/lib/jvm/*"), reverse=True):
-            for jbin in ["bin/java", "jre/bin/java"]:
-                path = os.path.join(jdir, jbin)
-                if os.path.exists(path) and path not in seen:
-                    seen.add(path)
-                    try:
-                        ver = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-                        version_str = ver.stderr.strip()
-                        if '"' in version_str:
-                            version_str = version_str.split('"')[1]
-                        else:
-                            version_str = version_str[:50]
-                        javas.append({"path": path, "version": version_str})
-                    except Exception:
-                        pass
+            add_java(os.path.join(jdir, "bin/java"))
+            add_java(os.path.join(jdir, "jre/bin/java"))
 
         return javas
 

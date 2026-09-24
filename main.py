@@ -70,27 +70,6 @@ def set_window_icon(window):
         logging.warning("Could not set window icon: %s", e)
 
 
-def _import_gi():
-    try:
-        import gi
-        return gi
-    except ImportError:
-        for p in [
-            "/usr/lib/python3.12/site-packages",
-            "/usr/lib/python3.11/site-packages",
-            "/usr/lib/python3.10/site-packages",
-            "/usr/lib/python3/dist-packages",
-        ]:
-            if p not in sys.path:
-                sys.path.insert(0, p)
-            try:
-                import gi
-                return gi
-            except ImportError:
-                continue
-    logging.warning("gi module not found - window icon unavailable")
-    return None
-
 
 def start_ui():
     ensure_dirs()
@@ -102,6 +81,10 @@ def start_ui():
         threading.Thread(target=lambda: [discord_rpc.init_rpc(), discord_rpc.update_menu()], daemon=True).start()
 
     html_path = os.path.join(os.path.dirname(__file__), "ui", "index.html")
+
+    if not settings.get("hw_accel", True):
+        os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+        os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 
     _set_default_icon()
 
