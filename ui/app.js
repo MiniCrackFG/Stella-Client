@@ -391,12 +391,20 @@ function closeWin() { pywebview.api.close_window(); }
 
 /* Frameless drag via begin_move_drag */
 function initDrag() {
-  const region = document.getElementById('drag-region');
-  if (!region) return;
-  region.addEventListener('mousedown', (e) => {
+  const bar = document.getElementById('titlebar');
+  if (!bar) return;
+  bar.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    // Los botones viven dentro de la barra: si la pulsación nace en uno, es un
+    // clic suyo y no un arrastre.
+    if (e.target.closest && e.target.closest('.win-btns')) return;
     pywebview.api.begin_window_move(e.button, e.screenX, e.screenY, e.timeStamp);
     e.preventDefault();
+  });
+  // Doble clic en la barra: maximizar o restaurar, como en cualquier ventana.
+  bar.addEventListener('dblclick', (e) => {
+    if (e.target.closest && e.target.closest('.win-btns')) return;
+    maximizeWin();
   });
 }
 
@@ -414,7 +422,7 @@ function showSplash() {
 
 function initApp() {
   const steps = [
-    createStars, scheduleShootingStar, initInputEffects, showSplash,
+    initPlatform, createStars, scheduleShootingStar, initInputEffects, showSplash,
     initDrag, initSidebar, initTabs, loadVersions, refreshHome,
     refreshAccount, initSettings, initModsPage, refreshVersions, refreshInstances,
   ];
@@ -424,6 +432,17 @@ function initApp() {
   }
   setTimeout(hideSplash, 1500);
   setTimeout(hideSplash, 5000);
+}
+
+/* Sistema en el que corre el launcher: hay detalles de estilo que sólo valen en
+   uno (la barra de scroll), y así los elegimos por CSS y no por el userAgent. */
+async function initPlatform() {
+  try {
+    const platform = await pywebview.api.get_platform();
+    if (platform === 'windows') document.body.classList.add('platform-win');
+  } catch (e) {
+    console.error('init: get_platform', e);
+  }
 }
 
 /* Espera activa al puente de pywebview: no dependemos de un único evento */
@@ -773,17 +792,41 @@ async function loadVersions() {
 }
 
 /* Account */
+/* La cabeza de la skin la carga la propia página: es el mismo camino por el que
+   ya se ven las miniaturas de los mods, y así no depende de la descarga que hace
+   el backend. Si esa imagen no llega se pide el segundo intento al backend y,
+   como última red, se pinta el glifo local: lo que nunca se pinta es un `src`
+   vacío, que era el icono de imagen rota que salía en la ventana.
+
+   El color va dentro del SVG a propósito: este dibujo se pinta dentro de un
+   `<img>`, y ahí no hereda nada de la página (`currentColor` se quedaría en
+   negro sobre el fondo oscuro y no se vería). */
+const AVATAR_GLYPH = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2">' +
+  '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+);
+
+function avatarUrl(uuid) {
+  return `https://mc-heads.net/avatar/${encodeURIComponent(uuid || 'steve')}/128`;
+}
+
+/* Segundo intento y última red: el backend, y si tampoco trae nada, el glifo. */
+async function avatarRetry(img, uuid) {
+  if (img.dataset.avatarRetried) { img.src = AVATAR_GLYPH; return; }
+  img.dataset.avatarRetried = '1';
+  let url = '';
+  try { url = await pywebview.api.get_avatar(uuid || ''); } catch (e) { url = ''; }
+  img.src = url || AVATAR_GLYPH;
+}
+
+function avatarImg(uuid, attributes = '') {
+  return `<img src="${escapeHtml(avatarUrl(uuid))}" alt="" ${attributes} onerror="avatarRetry(this,'${jsArg(uuid)}')" />`;
+}
+
 function updateNavAvatar(uuid) {
   const navAvatar = document.getElementById('nav-avatar');
   if (!navAvatar) return;
-  pywebview.api.get_avatar(uuid).then(url => {
-    if (url) {
-      navAvatar.innerHTML = `<img src="${escapeHtml(url)}" alt="" />`;
-    } else {
-      const fallback = 'data:image/svg+xml,' + encodeURIComponent('<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>');
-      navAvatar.innerHTML = `<img src="${fallback}" alt="" />`;
-    }
-  });
+  navAvatar.innerHTML = avatarImg(uuid);
 }
 
 async function refreshAccount() {
@@ -804,10 +847,9 @@ async function refreshAccount() {
 
     let loginBadge = '';
     if (displayName) {
-      const url = await pywebview.api.get_avatar(skinUuid);
       loginBadge = `
         <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;margin-top:-8px">
-          <img src="${escapeHtml(url)}" alt="" style="width:64px;height:64px;border-radius:var(--radius);border:2px solid var(--border);background:var(--card);flex-shrink:0" />
+          ${avatarImg(skinUuid, 'style="width:64px;height:64px;border-radius:var(--radius);border:2px solid var(--border);background:var(--card);flex-shrink:0"')}
           <div>
             <div style="font-size:13px;color:var(--text2)">Logged in as</div>
             <div style="font-size:28px;font-weight:800;color:var(--text)">${escapeHtml(displayName)}</div>
@@ -815,8 +857,7 @@ async function refreshAccount() {
         </div>`;
       skinEl.innerHTML = '';
     } else {
-      const url = await pywebview.api.get_avatar('');
-      skinEl.innerHTML = `<img src="${escapeHtml(url)}" alt="skin" />`;
+      skinEl.innerHTML = avatarImg(skinUuid);
     }
 
     if (auth && auth.username) {

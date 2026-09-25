@@ -14,6 +14,13 @@ from launcher import paths
 
 logger = logging.getLogger(__name__)
 
+# Algunas redes (y algún CDN por delante) rechazan el agente con el que `requests`
+# se presenta por defecto: se manda el de un navegador, que es lo que esperan.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 def _open_url(url):
     """Abre una URL en el navegador del sistema."""
@@ -349,18 +356,41 @@ class API:
         return candidates
 
     def get_avatar(self, uuid=None):
+        """La cabeza de la skin como imagen lista para pintar, o "" si no se pudo.
+
+        La vista de la cuenta ya no depende de esto —carga la imagen desde la
+        propia página, que es el camino que el motor de la ventana tiene
+        probado—: queda como segundo intento, así que lo que importa aquí es que
+        el motivo de un fallo quede en el registro en vez de perderse.
+        """
         import requests
         import base64
+        ident = uuid or "steve"
+        url = f"https://mc-heads.net/avatar/{ident}/128"
         try:
-            ident = uuid or "steve"
-            url = f"https://mc-heads.net/avatar/{ident}/128"
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200 and resp.headers.get("Content-Type", "").startswith("image/"):
-                b64 = base64.b64encode(resp.content).decode()
-                return f"data:image/png;base64,{b64}"
-        except Exception:
-            pass
-        return ""
+            resp = requests.get(url, timeout=10, headers={"User-Agent": _BROWSER_UA})
+            if resp.status_code != 200:
+                logger.info(f"get_avatar: {url} respondió {resp.status_code}")
+                return ""
+            content_type = resp.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
+                logger.info(f"get_avatar: {url} respondió con tipo {content_type or 'desconocido'}")
+                return ""
+            b64 = base64.b64encode(resp.content).decode()
+            return f"data:image/png;base64,{b64}"
+        except Exception as e:
+            logger.info(f"get_avatar: {url} falló: {e}")
+            return ""
+
+    def get_platform(self):
+        """Sistema en el que corre el launcher.
+
+        La interfaz tiene detalles que sólo valen en uno —la barra de scroll la
+        pinta Chromium en Windows y el tema del escritorio en Linux—, y esto lo
+        responde la misma función que decide todo lo demás en vez del
+        `navigator.userAgent`.
+        """
+        return "windows" if paths.is_windows() else "linux"
 
     def open_url(self, url):
         _open_url(url)
@@ -602,13 +632,30 @@ class API:
             self._window.minimize()
         return {"ok": True}
 
-    _maximized = True  # main.py crea la ventana maximizada
+    _maximized = True  # sólo se usa donde no se le puede preguntar al sistema
 
     def toggle_maximize(self):
-        """El botón □ alterna maximizado/restaurado: pywebview no lo hace solo."""
+        """El botón □ alterna maximizado/restaurado: pywebview no lo hace solo.
+
+        En Windows el estado lo sabe el propio sistema, así que se le pregunta en
+        vez de llevarlo por nuestra cuenta: adivinarlo era lo que dejaba el botón
+        desincronizado en cuanto la ventana se maximizaba de otra forma.
+        """
         if not hasattr(self, '_window') or not self._window:
             return {"ok": False}
         try:
+            if paths.is_windows():
+                from launcher import winwindow
+
+                if winwindow.is_maximized(self._window):
+                    self._window.restore()
+                    return {"ok": True, "maximized": False}
+                # Maximizar a la ventana, no por `window.maximize()`: ver
+                # `launcher/winwindow.py`, que es quien deja la barra de tareas
+                # a la vista.
+                winwindow.maximize(self._window)
+                return {"ok": True, "maximized": True}
+
             native = getattr(self._window, 'native', None)
             if native is not None and hasattr(native, 'is_maximized'):
                 self._maximized = bool(native.is_maximized())
@@ -674,6 +721,12 @@ class API:
         equivalente de `begin_move_drag` en GTK: el sistema entra en su propio
         bucle de movimiento y no vuelve a cruzar nada por el puente hasta que se
         suelta el botón.
+
+        Va con `PostMessage` y no con `SendMessage` a propósito: las llamadas de
+        la página llegan en un hilo aparte, y con `SendMessage` el bucle nativo
+        arrancaba dentro de esa llamada, entre hilos, y el movimiento salía a
+        tirones. Encolado, lo recoge el hilo de la interfaz en su bomba de
+        mensajes, exactamente igual que si lo hubiera iniciado el ratón.
         """
         try:
             import ctypes
@@ -688,17 +741,20 @@ class API:
 
             user32 = ctypes.WinDLL("user32", use_last_error=True)
             user32.ReleaseCapture.argtypes = []
-            user32.SendMessageW.argtypes = [
+            user32.ReleaseCapture.restype = wintypes.BOOL
+            user32.PostMessageW.argtypes = [
                 wintypes.HWND,
                 wintypes.UINT,
                 wintypes.WPARAM,
                 wintypes.LPARAM,
             ]
-            user32.SendMessageW.restype = wintypes.LPARAM
+            user32.PostMessageW.restype = wintypes.BOOL
 
             user32.ReleaseCapture()
-            user32.SendMessageW(wintypes.HWND(handle), 0x00A1, 2, 0)  # WM_NCLBUTTONDOWN, HTCAPTION
-            return {"ok": True}
+            posted = user32.PostMessageW(
+                wintypes.HWND(handle), 0x00A1, 2, 0
+            )  # WM_NCLBUTTONDOWN, HTCAPTION
+            return {"ok": bool(posted)}
         except Exception as e:
             logger.info(f"begin_window_move en Windows falló: {e}")
             return {"ok": False}

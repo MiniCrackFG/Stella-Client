@@ -110,15 +110,23 @@ Primero lo automático:
 .\build.ps1 check
 ```
 
-Eso comprueba el runtime de WebView2 y el puente con .NET, y crea y cierra una
-ventana de verdad. Si devuelve error, no instales nada todavía: pásame la salida.
+Eso comprueba el runtime de WebView2 y el puente con .NET, imprime el área de
+trabajo de la pantalla y la geometría de ventana guardada (y si esa geometría se
+va a usar o se va a abrir centrada), y crea y cierra una ventana de verdad. Si
+devuelve error, no instales nada todavía: pásame la salida.
 
 Después, **instala el `Setup.exe` y prueba esto a mano**, que es lo que no se puede
 comprobar sin un Windows delante:
 
 - [ ] La ventana abre y se ve la interfaz (no en blanco).
-- [ ] **La barra de título arrastra la ventana.**
-- [ ] Los botones de minimizar, maximizar y cerrar responden.
+- [ ] La primera vez abre **centrada**.
+- [ ] **Recuerda el tamaño y el sitio**: redimensiónala (por un borde o una esquina), ciérrala y vuelve a abrirla; tiene que aparecer con ese tamaño y en ese sitio, no centrada otra vez. La prueba buena es estirarla hasta que ocupe media pantalla, cerrar y abrir.
+- [ ] **Si la cierras maximizada**, la próxima vez abre maximizada (y al restaurar vuelve a su tamaño de antes).
+- [ ] **□ maximiza dejando la barra de tareas a la vista**: la ventana ocupa la pantalla menos la barra, no la pantalla entera. Al volver del maximizado, deja la ventana donde estaba. El doble clic en la barra de título hace lo mismo.
+- [ ] La ventana se puede **redimensionar** arrastrando bordes y esquinas.
+- [ ] **La barra de título arrastra la ventana**, y con el ratón el movimiento se ve fluido (sin tirones). Pulsar en los botones no arrastra.
+- [ ] En **Account** se ve la cabeza de la skin; si no hay red, el dibujo de reserva. Nunca un icono de imagen rota ni un hueco vacío.
+- [ ] La **barra de scroll** de Mods es morada como en Linux, no blanca.
 - [ ] Se puede **copiar** algo al portapapeles (por ejemplo el código de inicio de sesión de Microsoft) y pegarlo en otro sitio.
 - [ ] **Ajustes → Detectar Java** encuentra tu Java instalado.
 - [ ] Al **jugar**, descarga el juego y arranca Minecraft sin una ventana negra de consola detrás.
@@ -142,6 +150,8 @@ El registro de todo lo que hace el launcher está en:
 | "No encuentro ISCC.exe" | Inno Setup no instalado o en otra ruta | Instálalo desde <https://jrsoftware.org/isdl.php> |
 | "Unknown identifier 'x64compatible'" al compilar el instalador | Inno Setup anterior a la 6.3 | Actualiza Inno Setup |
 | El instalador sale, pero al abrir el programa no aparece la ventana | Suele ser el runtime de WebView2 o el puente con .NET | Mira `stella.log`, que ahí está la excepción concreta |
+| La ventana abre en un sitio incómodo y no hay forma de dejarla donde quieres | Es la geometría que se recuerda entre sesiones | Cierra el launcher, borra la clave `"window"` de `%LOCALAPPDATA%\StellaClient\config.json` y vuelve a abrirlo |
+| La ventana no recuerda el tamaño entre sesiones | Hay una geometría inservible guardada (las versiones anteriores a la 0.2.1 guardaban ceros) | Borra la clave `"window"` de `%LOCALAPPDATA%\StellaClient\config.json` y vuelve a probar: en `stella.log` queda la línea «Geometría de la ventana guardada en …» con lo que se guardó |
 | Windows avisa de que "protegió tu PC" | El instalador no está firmado | Es esperado: *Más información → Ejecutar de todas formas*. Se arregla con un certificado de firma, que es dinero y trámite, no código |
 | `pip` se queja de PyGObject | No debería: está marcado como sólo para Linux | Mándame el error, porque significa que la marca no está funcionando |
 

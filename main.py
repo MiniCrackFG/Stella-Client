@@ -97,8 +97,46 @@ def _drop_bundled_gui_paths():
             os.environ.pop("XDG_DATA_DIRS", None)
 
 
-# Antes de importar webview a propósito: pywebview carga su backend GTK y las
-# variables tienen que estar ya en su sitio.
+def _use_gtk_backend():
+    """Deja claro que en Linux la ventana la dibuja GTK.
+
+    pywebview se pasa a Qt por su cuenta cuando ve `KDE_FULL_SESSION`, y eso en
+    KDE significa dos cosas: que cada arranque empieza intentando cargar Qt
+    —con su volcado de error en el registro, que parece un fallo y no lo es— y
+    que en un equipo con Qt instalado la ventana cambiaría de motor. Aquí la
+    interfaz está escrita contra GTK: el icono, el portapapeles y `--check` son
+    de GTK. Se pide ese backend y se respeta lo que alguien haya fijado a mano.
+    """
+    os.environ.setdefault("PYWEBVIEW_GUI", "gtk")
+
+
+def _avoid_wayland_frame():
+    """Pide el backend X11 cuando la sesión es Wayland.
+
+    Sin marco nativo, en Wayland el compositor dibuja su propia barra y no hay
+    forma de pedirle que no la dibuje: el protocolo sólo permite elegir entre
+    "la dibuja la aplicación" o "la dibuja el compositor", y GTK 3 no puede
+    elegir ninguna de las dos a secas. El resultado es que al título que ya trae
+    el launcher se le suma por encima el del sistema. Por X11 la petición sí
+    llega al gestor de ventanas, así que la ventana queda con una sola barra:
+    la del launcher.
+
+    Se respeta `GDK_BACKEND` si ya viene puesto —quien lo fija a mano manda— y
+    sin XWayland (no hay `DISPLAY`) no se toca nada: forzar X11 ahí dejaría al
+    launcher sin ventana.
+    """
+    if os.environ.get("GDK_BACKEND"):
+        return
+    if not os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("DISPLAY"):
+        return
+    os.environ["GDK_BACKEND"] = "x11"
+
+
+# Antes de importar webview a propósito: pywebview elige backend al importarse y
+# las variables tienen que estar ya en su sitio.
+if not paths.is_windows():
+    _use_gtk_backend()
+    _avoid_wayland_frame()
 _drop_bundled_gui_paths()
 
 import webview
@@ -176,6 +214,100 @@ def set_window_icon(window):
 
 
 
+def _winwindow():
+    """El módulo de ventana de Windows, importado sólo cuando se está en Windows.
+
+    Aquí arriba no puede estar: en Linux ni siquiera existe `ctypes.WINFUNCTYPE`,
+    que es con lo que declara sus llamadas al sistema.
+    """
+    from launcher import winwindow
+
+    return winwindow
+
+
+def _wait_for_window(window, timeout=5.0):
+    """Espera a que la ventana pueda atendernos y devuelve si llegó a tiempo.
+
+    `webview.start(func=...)` lanza este hilo *antes* de crear la ventana, así
+    que sin esta espera el trabajo llegaría a una ventana que todavía no está
+    —no haría nada, y la ventana aparecería en su sitio de siempre, que es justo
+    lo que se quería arreglar—. Se espera también a que pywebview la haya
+    enseñado una vez (es su forma de dejarla lista antes de ocultarla), porque
+    hasta ese momento pedir que se enseñe se queda en nada, sin error ninguno.
+
+    Dura milisegundos: la ventana se construye en cuanto arranca el bucle.
+    """
+    events = getattr(window, "events", None)
+    shown = getattr(events, "shown", None)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        ready = getattr(window, "native", None) is not None
+        if ready and (shown is None or shown.is_set()):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _show_window(window, attempts=8):
+    """Enseña la ventana y comprueba que de verdad se ve.
+
+    Con la ventana creada oculta, una petición que llegue antes de tiempo no
+    falla: simplemente no la enseña. Como quedarse sin interfaz es el peor final
+    posible, aquí se insiste hasta que Windows confirma que está en pantalla.
+    """
+    winwindow = _winwindow()
+    for _ in range(attempts):
+        try:
+            window.show()
+            if winwindow.is_visible(window):
+                return True
+        except Exception as e:
+            logging.warning("No se pudo mostrar la ventana: %s", e)
+            return False
+        time.sleep(0.25)
+    logging.warning("La ventana no confirmó que esté visible")
+    return False
+
+
+def _place_window(window, settings):
+    """Coloca la ventana antes de que se vea, con la geometría de la última vez.
+
+    Pase lo que pase la ventana se enseña: quedarse sin interfaz por no poder
+    centrarla sería un arreglo peor que el problema.
+    """
+    try:
+        _wait_for_window(window)
+        winwindow = _winwindow()
+        # Sin marco nativo Windows no ofrece redimensionar; devolverle ese borde
+        # es lo primero, y de paso es también lo que hace que maximizar de
+        # verdad ocupe la pantalla menos la barra de tareas.
+        winwindow.enable_sizing_frame(window)
+        remembered = settings.get("window")
+        winwindow.place(window, remembered)
+        if isinstance(remembered, dict) and remembered.get("maximized"):
+            # No `window.maximize()`: en Windows maximizar así es estirar la
+            # ventana hasta el borde de la pantalla, barra de tareas incluida.
+            winwindow.maximize(window)
+    except Exception as e:
+        logging.warning("No se pudo colocar la ventana: %s", e)
+    finally:
+        _show_window(window)
+
+
+def _remember_window(window):
+    """Guarda tamaño, posición y si estaba maximizada, para abrir igual la próxima vez."""
+    try:
+        geometry = _winwindow().capture(window)
+        if not geometry:
+            return
+        settings = minecraft.load_settings()
+        settings["window"] = geometry
+        minecraft.save_settings(settings)
+        logging.info("Geometría de la ventana guardada en %s: %s", paths.config_file(), geometry)
+    except Exception as e:
+        logging.warning("No se pudo guardar la geometría de la ventana: %s", e)
+
+
 def start_ui():
     # Antes que nada: si los datos vienen de la ruta antigua se trasladan, y así
     # cualquier lectura posterior ya los encuentra donde toca.
@@ -207,14 +339,18 @@ def start_ui():
         title="Stella Client",
         url=html_path,
         js_api=api,
-        width=1000,
-        height=600,
+        # En Windows la ventana nace oculta y se coloca en `_place_window` con la
+        # geometría de la última sesión: crearla ya maximizada y sin marco es
+        # justo lo que la dejaba grande y descolocada. En Linux no se cambia nada.
+        width=1200 if paths.is_windows() else 1000,
+        height=750 if paths.is_windows() else 600,
         min_size=(800, 450),
         resizable=True,
         fullscreen=False,
-        maximized=True,
+        maximized=not paths.is_windows(),
         frameless=True,
         easy_drag=False,
+        hidden=paths.is_windows(),
         background_color="#0a0a0a",
     )
 
@@ -222,8 +358,17 @@ def start_ui():
 
     if window and window.events:
         window.events.closing += discord_rpc.close_rpc
+        if paths.is_windows():
+            # Este evento se ejecuta en el sitio, así que la ventana todavía está
+            # ahí y se puede medir su geometría.
+            window.events.closing += lambda: _remember_window(window)
 
-    webview.start(debug=False, func=lambda: set_window_icon(window))
+    def _after_start():
+        set_window_icon(window)
+        if paths.is_windows():
+            _place_window(window, settings)
+
+    webview.start(debug=False, func=_after_start)
 
 
 # --- Comprobación del entorno (--check) ---------------------------------
@@ -347,6 +492,20 @@ def _check_windows():
         print("  pythonnet  : disponible")
     except Exception as e:
         problems.append(f"pythonnet no carga: {e}")
+
+    try:
+        from launcher import winwindow
+
+        print(f"  pantalla   : área de trabajo {winwindow.primary_work_area()}")
+        remembered = minecraft.load_settings().get("window")
+        usable = winwindow.remembered_box(remembered)
+        print(f"  ventana    : {remembered if remembered else 'sin geometría guardada'}")
+        print(
+            "  colocación : "
+            + (f"se abrirá en {usable}" if usable else "se abrirá centrada (sin geometría utilizable)")
+        )
+    except Exception as e:
+        problems.append(f"no se pudo leer la geometría de la ventana: {e}")
 
     if problems:
         for problem in problems:

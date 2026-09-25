@@ -1125,6 +1125,32 @@ input[type="text"]:focus, input[type="search"]:focus {
 .featured-item .fi-info .fi-name { font-weight: 700; font-size: 15px; }
 .featured-item .fi-info .fi-desc { font-size: 13px; color: var(--text2); }
 
+/* Barra de scroll.
+   En Windows la dibuja el motor de la ventana (Chromium) y, sin estas reglas,
+   usa la suya clara, que no pega nada con la interfaz. En Linux la dibuja el
+   tema del escritorio —que ya encaja—, así que todo esto va detrás de
+   `.platform-win`: esa clase la pone la interfaz según lo que responde el
+   backend, porque WebKit también entiende `::-webkit-scrollbar` y sin la marca
+   se le cambiaría la barra que allí ya está bien.
+   `color-scheme` es la otra mitad del asunto: sin él el motor sigue
+   considerando la página clara por mucho que el fondo sea oscuro. */
+body.platform-win { color-scheme: dark; }
+body.platform-win.theme-light { color-scheme: light; }
+
+body.platform-win ::-webkit-scrollbar { width: 10px; height: 10px; }
+body.platform-win ::-webkit-scrollbar-track { background: transparent; }
+body.platform-win ::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.45);
+  border-radius: 8px;
+  /* Borde transparente recortado al contenido: así el pulgar queda más estrecho
+     que la pista y se ve el fondo por los lados. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+body.platform-win ::-webkit-scrollbar-thumb:hover { background: rgba(168, 85, 247, 0.7); }
+body.platform-win ::-webkit-scrollbar-corner { background: transparent; }
+body.platform-win.theme-light ::-webkit-scrollbar-thumb { background: rgba(124, 92, 191, 0.45); }
+
 /* Responsive */
 @media (max-width: 700px) {
   #content { padding: 16px; }
