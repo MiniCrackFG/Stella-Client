@@ -3,7 +3,7 @@
 ; No se compila a mano: lo llama `build.ps1` y le pasa tres datos por la línea de
 ; órdenes para que `VERSION` siga siendo el único sitio donde vive la versión.
 ;
-;   /DMyAppVersion=0.1.0
+;   /DMyAppVersion=<versión de VERSION>
 ;   /DRepoDir=<ruta absoluta del repositorio>
 ;   /DBuildDir=<ruta absoluta del payload>
 ;   /DOutputDir=<ruta absoluta donde dejar el Setup.exe>

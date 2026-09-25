@@ -83,8 +83,11 @@ las dependencias. Las siguientes tarda menos de la mitad.
 
 1. **Entorno de build** — crea `.venv-win` con Python 3.13 e instala las dependencias.
 2. **Payload** — genera `assets/icon.ico` desde el PNG y empaqueta con PyInstaller en `dist\app\stella-client\`. Dentro quedan `stella-client.exe` (el que ve el jugador), `stella-client-check.exe` (el comprobador, con consola) y `_internal\` con el intérprete y las librerías.
-3. **Instalador** — Inno Setup lo envuelve en `dist\packages\StellaClient-Setup-0.1.0.exe`.
-4. **ZIP portátil** — `dist\packages\StellaClient-0.1.0-win64.zip`, para quien no quiera instalar nada.
+3. **Instalador** — Inno Setup lo envuelve en `dist\packages\StellaClient-Setup-<versión>.exe`.
+4. **ZIP portátil** — `dist\packages\StellaClient-<versión>-win64.zip`, para quien no quiera instalar nada.
+
+La `<versión>` de los nombres es la que dice el fichero `VERSION` del repositorio: es
+el único sitio donde vive, así que no la busques escrita en ningún script.
 
 Al final imprime los artefactos y su tamaño. Cuenta con **40–60 MB** el instalador.
 

@@ -39,8 +39,31 @@ jobs:
 
       - name: Construir payload, instalador y ZIP
         shell: pwsh
-        run: ./build.ps1 payload installer zip check
+        run: ./build.ps1 payload installer zip
 
+      # Se separa de la construcción a propósito: así el registro distingue
+      # "no compila" de "compila pero no arranca", que son dos problemas muy
+      # distintos y se arreglan en sitios distintos.
+      - name: Comprobar el entorno sobre el payload
+        shell: pwsh
+        run: ./build.ps1 check
+
+      # Esta ejecución es el primer contacto del porte con un Windows de verdad,
+      # así que si la comprobación falla se sube igualmente lo que se haya
+      # construido: un fallo sin artefacto obliga a una segunda ronda a ciegas.
+      # `if-no-files-found: ignore` porque puede fallar antes de que exista nada.
+      - name: Guardar el diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stella-client-diagnostics
+          path: |
+            dist/packages/*
+            dist/app/stella-client/**
+          if-no-files-found: ignore
+
+      # Este sí es el entregable: si la comprobación no ha pasado, el job ya ha
+      # fallado y este paso no llega a ejecutarse.
       - uses: actions/upload-artifact@v4
         with:
           name: stella-client-windows
