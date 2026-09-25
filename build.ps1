@@ -19,17 +19,40 @@ nombres: el payload se construye una sola vez y el instalador y el ZIP envuelven
 exactamente ese mismo directorio, así que no puede salir un instalador con un
 binario distinto del que se acaba de comprobar.
 #>
-[CmdletBinding()]
-param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]] $Targets,
-
-    # Intérprete con el que montar el entorno de build. Por defecto se busca
-    # Python 3.13, que es la versión que soporta pythonnet.
-    [string] $Python = ""
-)
-
 $ErrorActionPreference = "Stop"
+
+# --- Argumentos ----------------------------------------------------------
+#
+# Sin bloque param() a propósito. Con param() + [CmdletBinding()] el enlazador
+# de PowerShell se quedaba con el primer objetivo: al declarar $Targets como
+# [Parameter(ValueFromRemainingArguments)] y tener $Python al lado, `payload`
+# acababa dentro de $Python, y el script intentaba montar el entorno con
+# "payload" como si fuera un intérprete —lo que reventaba justo en integración
+# continua, que es el único sitio donde se pasan objetivos por línea de
+# órdenes—. Sin param() nada se reordena: los argumentos llegan a $args tal
+# cual y aquí se separan.
+$Targets = @()
+
+# Intérprete con el que montar el entorno de build. Por defecto se busca
+# Python 3.13, que es la versión que soporta pythonnet.
+$Python = ""
+
+$index = 0
+while ($index -lt $args.Count) {
+    $argument = [string]$args[$index]
+    $index++
+    if ($argument -match '^-{1,2}python$') {
+        if ($index -ge $args.Count) {
+            throw "Falta la ruta del intérprete después de -Python"
+        }
+        $Python = [string]$args[$index]
+        $index++
+    } elseif ($argument -match '^-{1,2}python=(.+)$') {
+        $Python = $Matches[1]
+    } else {
+        $Targets += $argument
+    }
+}
 
 $Root = $PSScriptRoot
 $Version = (Get-Content -Raw (Join-Path $Root "VERSION")).Trim()
@@ -47,6 +70,21 @@ $Checks = Join-Path $Payload "stella-client-check.exe"
 $GuiExe = Join-Path $Payload "stella-client.exe"
 
 
+function Show-Usage {
+    Write-Host "Uso: .\build.ps1 [objetivos...] [-Python <ruta>]"
+    Write-Host ""
+    Write-Host "Sin objetivos hace payload + installer + zip. Los objetivos son:"
+    Write-Host "  payload           sólo el binario"
+    Write-Host "  installer         instalador (construye el payload si hace falta)"
+    Write-Host "  zip               ZIP portátil (idem)"
+    Write-Host "  check             comprueba el entorno sobre el payload"
+    Write-Host "  launch            arranca la interfaz y confirma que sigue en pie"
+    Write-Host "  --clean           borra los artefactos (deja el entorno de build)"
+    Write-Host ""
+    Write-Host "-Python <ruta> usa otro intérprete para montar el entorno."
+}
+
+
 function Clean-Artifacts {
     # No se toca .venv-win: al igual que build.sh conserva su entorno de build,
     # esto conserva el suyo, que tarda más en montarse que el payload en salir.
@@ -62,6 +100,12 @@ function Clean-Artifacts {
 
 function Get-SystemPython {
     if ($Python) {
+        # Puede ser una ruta o un nombre que esté en el PATH (`py`). Si no es
+        # ninguna de las dos cosas, es un error claro en vez de un
+        # "The term '...' is not recognized" tres pasos más adelante.
+        if (-not (Test-Path $Python) -and -not (Get-Command $Python -ErrorAction SilentlyContinue)) {
+            throw "No encuentro el intérprete indicado con -Python: $Python"
+        }
         return $Python
     }
     # `py` es el lanzador oficial y permite pedir la versión exacta. Se prefiere
@@ -218,10 +262,14 @@ if (-not $Targets -or $Targets.Count -eq 0) {
 if ($Targets -contains "all") {
     $Targets = @("payload", "installer", "zip")
 }
-if ($Targets -contains "-h" -or $Targets -contains "--help") {
-    Get-Help $PSCommandPath -Detailed
+if ($Targets -contains "-h" -or $Targets -contains "--help" -or $Targets -contains "help") {
+    Show-Usage
     exit 0
 }
+
+# Se imprime a propósito: si algún día un objetivo se pierde por el camino,
+# esto lo deja ver en el registro antes de que falle nada.
+Write-Host ("==> Objetivos: {0}" -f ($Targets -join " "))
 
 foreach ($target in $Targets) {
     switch ($target) {
