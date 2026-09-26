@@ -267,6 +267,23 @@ body.no-smooth *::after {
 .win-btn:hover { background: var(--card); color: var(--text); }
 .win-close:hover { background: var(--danger); color: white; }
 
+/* Redimensión sin marco. La ventana no tiene borde propio ni del sistema, así que
+   los tiradores son ocho franjas transparentes sobre los bordes: estrechas a
+   propósito (5 px, 12 en las esquinas), para que estén donde se busca un borde
+   sin quitarle el clic a la interfaz que hay justo debajo. La capa no recibe
+   clics (pointer-events: none); sólo las franjas. */
+#resize-layer { position: fixed; inset: 0; pointer-events: none; z-index: 500; }
+.resize-grip { position: absolute; pointer-events: auto; }
+.grip-n { top: 0; left: 12px; right: 12px; height: 5px; cursor: ns-resize; }
+.grip-s { bottom: 0; left: 12px; right: 12px; height: 5px; cursor: ns-resize; }
+.grip-w { left: 0; top: 12px; bottom: 12px; width: 5px; cursor: ew-resize; }
+.grip-e { right: 0; top: 12px; bottom: 12px; width: 5px; cursor: ew-resize; }
+.grip-nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+.grip-ne { top: 0; right: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.grip-sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.grip-se { bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+body.window-maximized #resize-layer { display: none; }
+
 /* Sidebar */
 #sidebar {
   width: var(--sidebar-w);

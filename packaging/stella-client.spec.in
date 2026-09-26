@@ -1,6 +1,7 @@
 # Plantilla del spec de RPM. rpm.sh sustituye @VERSION@ y las líneas @REQUIRES@
-# (que salen de build/requires-rpm.txt, medido con ldd sobre el payload) y le pasa
-# el árbol ya montado en la macro _payload. Así el layout lo define un único
+# (que salen de build/requires-rpm.txt: sonames medidos con ldd sobre el payload
+# más los sonames de GTK/WebKitGTK, que se cargan al vuelo y no salen en ldd) y le
+# pasa el árbol ya montado en la macro _payload. Así el layout lo define un único
 # fichero, packaging/files.sh, y no hay forma de que el .rpm y el .deb acaben con
 # árboles distintos.
 

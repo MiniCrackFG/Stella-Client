@@ -386,7 +386,12 @@ function toast(text, type = 'info') {
 
 /* Window controls */
 function minimizeWin() { pywebview.api.minimize(); }
-function maximizeWin() { pywebview.api.toggle_maximize(); }
+async function maximizeWin() {
+  const state = await pywebview.api.toggle_maximize();
+  // El backend devuelve cómo quedó la ventana: es lo que dice si los tiradores
+  // de los bordes siguen teniendo sentido.
+  if (state) applyWindowState(state);
+}
 function closeWin() { pywebview.api.close_window(); }
 
 /* Frameless drag via begin_move_drag */
@@ -408,6 +413,65 @@ function initDrag() {
   });
 }
 
+/* Redimensión desde los bordes. La ventana no tiene marco —ni propio ni del
+   sistema—, así que no hay borde que agarrar y las franjas van en la interfaz.
+   El gesto no lo lleva este código: cada franja se lo pide al gestor de ventanas
+   (`begin_window_resize`, en api.py), que es quien lo hace sin tirones. */
+const RESIZE_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+
+async function initResize() {
+  let state = null;
+  try {
+    state = await pywebview.api.window_state();
+  } catch (e) {
+    console.error('init: window_state', e);
+    return;
+  }
+  // Donde el redimensionado lo lleva el sistema no se pinta nada: mejor no
+  // tener tiradores que tenerlos sin hacer nada.
+  if (!state || !state.resizable) return;
+
+  const layer = document.createElement('div');
+  layer.id = 'resize-layer';
+  for (const edge of RESIZE_EDGES) {
+    const grip = document.createElement('div');
+    grip.className = `resize-grip grip-${edge}`;
+    grip.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      pywebview.api.begin_window_resize(edge, e.button, e.screenX, e.screenY, e.timeStamp);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    layer.appendChild(grip);
+  }
+  document.body.appendChild(layer);
+  applyWindowState(state);
+
+  // La ventana también se maximiza sin pasar por el botón —doble clic en su
+  // barra, menú del gestor, atajo del escritorio—, así que el estado se vuelve a
+  // preguntar cuando cambia el tamaño.
+  let pending = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(pending);
+    pending = setTimeout(refreshWindowState, 150);
+  });
+}
+
+async function refreshWindowState() {
+  try {
+    const state = await pywebview.api.window_state();
+    if (state) applyWindowState(state);
+  } catch (e) {
+    // Sin respuesta no se cambia nada: la ventana se queda como estaba.
+  }
+}
+
+/* Con la ventana maximizada los tiradores no sirven de nada —el gestor no la va
+   a dejar crecer— y además quedarían encima del borde de la interfaz. */
+function applyWindowState(state) {
+  document.body.classList.toggle('window-maximized', !!state.maximized);
+}
+
 function hideSplash() {
   const s = document.getElementById('splash');
   if (!s) return;
@@ -423,7 +487,7 @@ function showSplash() {
 function initApp() {
   const steps = [
     initPlatform, createStars, scheduleShootingStar, initInputEffects, showSplash,
-    initDrag, initSidebar, initTabs, loadVersions, refreshHome,
+    initDrag, initResize, initSidebar, initTabs, loadVersions, refreshHome,
     refreshAccount, initSettings, initModsPage, refreshVersions, refreshInstances,
   ];
   for (const step of steps) {

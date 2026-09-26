@@ -7,3 +7,10 @@ Terminal=false
 Type=Application
 Categories=Game;Utility;
 StartupNotify=true
+# Con esto el escritorio sabe que la ventana que abre `stella-client` es la de
+# este lanzador. Sin la línea, en GNOME y en el dock de Ubuntu el `WM_CLASS` de
+# la ventana (`stella-client`) tiene que emparejarse por parecido con el nombre
+# del fichero, y cuando falla aparece un segundo icono suelto en vez de la
+# ventana abierta. Se puede ver el que tiene de verdad con `stella-client
+# --check`, que lo informa.
+StartupWMClass=stella-client

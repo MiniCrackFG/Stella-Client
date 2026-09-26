@@ -26,9 +26,13 @@ Un soname que no esté en la tabla **no pasa en silencio**: se reporta y el
 script falla, que es como se evita publicar un paquete con dependencias
 incompletas.
 
-Para el `.rpm` no hace falta traducir nada: rpm entiende requerimientos por
-soname (`libgtk-3.so.0()(64bit)`), y esos funcionan igual en Fedora, RHEL y
-openSUSE sin conocer el nombre del paquete en cada familia.
+Para el `.rpm` se piden las mismas cosas por **soname** (`libgtk-3.so.0()(64bit)`),
+que es el único nombre que Fedora, RHEL y openSUSE comparten sin conocer el
+paquete. Los `Provides` `typelib(...)` y los nombres de paquete NO sirven para
+esto: `typelib(Gtk)` sólo existe en openSUSE (Fedora mete los typelibs dentro
+del propio paquete de la librería, sin generarlos como provided), y `gtk3` /
+`webkit2gtk4.1` son nombres que cambian por familia. Con ellos, `dnf` aborta con
+«nada proporciona typelib(Gtk) = 3.0» antes de instalar nada.
 
 Escribe `build/external-libs.txt`, `build/depends-deb.txt` y
 `build/requires-rpm.txt`.
@@ -119,6 +123,8 @@ LIBRARY_MAP = {
     "libpixman-1.so.0": "deb:libpixman-1-0",
     "libffi.so.8": "deb:libffi8",
     "libz.so.1": "deb:zlib1g",
+    # Pedido por deb: en rpm NO se puede pedir por soname (ver
+    # RPM_SONAME_EXCEPTIONS): Fedora lo llama `libbz2.so.1`.
     "libbz2.so.1.0": "deb:libbz2-1.0",
     "libpcre2-8.so.0": "deb:libpcre2-8-0",
     "liblcms2.so.2": "deb:liblcms2-2",
@@ -183,11 +189,14 @@ LIBRARY_MAP = {
 # paquete se instala sin un solo error y luego no arranca — que es la peor clase
 # de fallo, porque aparece en la máquina del usuario y no en la del que empaqueta.
 #
-# En rpm se pueden pedir por su nombre de typelib (`typelib(Gtk) = 3.0`), que es
-# un provided real en Fedora, RHEL y openSUSE: ni hay que traducir nada ni hay
-# riesgo de equivocarse con el nombre del paquete en cada familia. En dpkg no
-# existe ese mecanismo, así que ahí sí van los nombres, con alternativas donde el
+# En dpkg hay que tirar de nombres de paquete, con alternativas donde el
 # renombrado `t64` de Ubuntu 24.04 los cambió.
+#
+# En rpm se piden por **soname**, que es lo único que direccionan igual Fedora,
+# RHEL y openSUSE: el paquete de la librería arrastra el typelib en las tres
+# familias (`gtk3` trae `Gtk-3.0.typelib`, `webkit2gtk4.1` trae `WebKit2-4.1.typelib`).
+# NO se piden `typelib(...)`: ese provided sólo lo genera openSUSE, y en Fedora
+# hacen abortar `dnf` con «nada proporciona typelib(Gtk) = 3.0».
 RUNTIME_DEPS_DEB = (
     "gir1.2-glib-2.0",
     "gir1.2-gtk-3.0",
@@ -201,20 +210,23 @@ RUNTIME_DEPS_DEB = (
     "libwebkit2gtk-4.1-0",
 )
 RUNTIME_DEPS_RPM = (
-    "typelib(GLib) = 2.0",
-    "typelib(GObject) = 2.0",
-    "typelib(Gio) = 2.0",
-    "typelib(Gtk) = 3.0",
-    "typelib(Gdk) = 3.0",
-    "typelib(GdkPixbuf) = 2.0",
-    "typelib(Pango) = 1.0",
-    "typelib(Atk) = 1.0",
-    "typelib(HarfBuzz) = 0.0",
-    "typelib(WebKit2) = 4.1",
-    "typelib(JavaScriptCore) = 4.1",
-    "gtk3",
-    "(webkit2gtk4.1 or libwebkit2gtk-4_1-0)",
+    "libgtk-3.so.0()(64bit)",
+    "libgdk-3.so.0()(64bit)",
+    "libgdk_pixbuf-2.0.so.0()(64bit)",
+    "libpango-1.0.so.0()(64bit)",
+    "libatk-1.0.so.0()(64bit)",
+    "libharfbuzz.so.0()(64bit)",
+    "libwebkit2gtk-4.1.so.0()(64bit)",
+    "libjavascriptcoregtk-4.1.so.0()(64bit)",
 )
+
+# Sonames que NO se pueden declarar en rpm porque su nombre no es el mismo en
+# todas las familias. bzip2 es el caso clásico: Debian y Arch publican
+# `libbz2.so.1.0`, Fedora y RHEL sólo `libbz2.so.1`. Pedir cualquiera de los dos
+# deja el paquete sin resolver en la mitad de las distros. Como lo arrastra la
+# pila gráfica (`libfreetype.so.6`, que sí se declara), no hay que pedirlo: en
+# cada sistema lo pone el freetype nativo, que enlaza contra su propio bzip2.
+RPM_SONAME_EXCEPTIONS = {"libbz2.so.1.0"}
 
 _GLIBC_VERSION = re.compile(r"GLIBC_(\d+)\.(\d+)")
 
@@ -410,7 +422,9 @@ def main():
     # rpm entiende requerimientos por soname, así que no hay que traducir nada:
     # funcionan igual en Fedora, RHEL y openSUSE sin saber el nombre del paquete.
     soname_requires = sorted(
-        s for s in external if classify(s) not in ("base", None)
+        s
+        for s in external
+        if classify(s) not in ("base", None) and s not in RPM_SONAME_EXCEPTIONS
     )
     (build_dir / "requires-rpm.txt").write_text(
         "".join(
@@ -445,7 +459,7 @@ def main():
     print(f"\n  declaradas (deb)   : {len(deb_entries)}")
     print(f"  glibc mínimo       : {glibc_str}")
     print(f"  base               : {len([s for s in external if classify(s) == 'base'])}")
-    print(f"  typelibs en caliente: {len(RUNTIME_DEPS_DEB)} dependencias de GTK/WebKitGTK")
+    print(f"  fuera de ldd       : deb {len(RUNTIME_DEPS_DEB)}, rpm {len(RUNTIME_DEPS_RPM)} (GTK/WebKitGTK)")
     print("  escritas en        : build/depends-deb.txt y build/requires-rpm.txt")
 
     if bundled or missing or unknown:

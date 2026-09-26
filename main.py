@@ -1,6 +1,8 @@
 import logging
 import logging.handlers
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -132,11 +134,44 @@ def _avoid_wayland_frame():
     os.environ["GDK_BACKEND"] = "x11"
 
 
+def _x11_backend():
+    """Si esta sesión va a acabar dibujando por X11, sea por el sistema o por nosotros.
+
+    Tres casos cuentan: quien ya trae `GDK_BACKEND=x11`, la sesión Wayland con
+    XWayland (donde lo pedimos nosotros, ver `_avoid_wayland_frame`) y la sesión
+    X11 de toda la vida, que no tiene `WAYLAND_DISPLAY` y sí `DISPLAY`.
+    """
+    backend = os.environ.get("GDK_BACKEND", "")
+    if backend:
+        return "x11" in backend.split(":")
+    return bool(os.environ.get("DISPLAY")) and not os.environ.get("WAYLAND_DISPLAY")
+
+
+def _avoid_client_side_decorations():
+    """Pide al gestor de ventanas que la ventana vaya sin decoración, por la vía clásica.
+
+    En X11 GTK puede llevar las decoraciones por su cuenta (CSD) o dejarlas en
+    manos del gestor. Con CSD, GTK se queda con los bordes de la ventana para sí
+    —son suyos los márgenes invisibles que permiten redimensionar— y eso choca
+    con una ventana sin marco a la que le ponemos tiradores propios: `GTK_CSD=0`
+    deja la ventana completamente lisa y con la petición de «sin decoración»
+    puesta donde el gestor la lee, que es lo que se quiere aquí. Es una variable
+    de GTK y no un ajuste nuestro, así que no se pisa si alguien la fija.
+
+    Sin gestor de ventanas de por medio —Wayland puro— no se toca: allí las
+    decoraciones las dibuja el compositor y `GTK_CSD=0` sólo traería rarezas.
+    """
+    if not _x11_backend():
+        return
+    os.environ.setdefault("GTK_CSD", "0")
+
+
 # Antes de importar webview a propósito: pywebview elige backend al importarse y
 # las variables tienen que estar ya en su sitio.
 if not paths.is_windows():
     _use_gtk_backend()
     _avoid_wayland_frame()
+    _avoid_client_side_decorations()
 _drop_bundled_gui_paths()
 
 import webview
@@ -308,6 +343,54 @@ def _remember_window(window):
         logging.warning("No se pudo guardar la geometría de la ventana: %s", e)
 
 
+def _report_start_failure(error):
+    """Explica en la terminal por qué no se abrió la ventana.
+
+    Sin esto, lo que ve quien lo sufre es el rastro interno de pywebview, que
+    intenta GTK, luego Qt y luego se rinde: veinte líneas de tres módulos que no
+    nombran ni una vez lo que falta. Un usuario reportó exactamente eso —un
+    `undefined symbol` en `_gi.so` por un paquete compilado contra una GLib más
+    nueva que la del sistema— y el mensaje no daba ninguna pista.
+
+    El caso `undefined symbol` se reconoce aparte porque no es un problema de esa
+    máquina: es el paquete el que está mal y quien lo recibe no puede arreglarlo
+    instalando nada.
+    """
+    detail = str(error) or error.__class__.__name__
+    recognized = False
+
+    print()
+    print("No se pudo abrir la ventana.")
+
+    if "undefined symbol" in detail:
+        recognized = True
+        print("  Esta compilación pide una versión de GLib más nueva que la del sistema:")
+        print(f"    {detail}")
+        print("  No es un problema de tu instalación: avisa de esta línea, que el")
+        print("  paquete se puede reconstruir contra lo que sí tienes.")
+    elif paths.is_windows():
+        recognized = True
+        print("  En Windows la ventana la dibuja el motor de Edge (WebView2), con el")
+        print("  puente de pythonnet. Las dos cosas se comprueban con:")
+        print("    stella-client-check")
+    else:
+        recognized = True
+        print("  La ventana la dibujan GTK 3 y WebKitGTK, que las tiene que poner tu")
+        print("  sistema. Instálalas y vuelve a intentarlo:")
+        print("    Debian/Ubuntu : sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1")
+        print("    Fedora        : sudo dnf install python3-gobject gtk3 webkit2gtk4.1")
+        print("    Arch          : sudo pacman -S python-gobject gtk3 webkit2gtk-4.1")
+        print(f"  Detalle: {detail}")
+        print("  Versiones y de dónde sale cada librería:")
+        print("    stella-client --check")
+
+    if recognized:
+        logging.error("No se pudo abrir la ventana: %s", detail)
+    else:
+        # Aquí no se sabe qué pasó, así que el rastro entero al registro.
+        logging.exception("No se pudo abrir la ventana")
+
+
 def start_ui():
     # Antes que nada: si los datos vienen de la ruta antigua se trasladan, y así
     # cualquier lectura posterior ya los encuentra donde toca.
@@ -368,7 +451,11 @@ def start_ui():
         if paths.is_windows():
             _place_window(window, settings)
 
-    webview.start(debug=False, func=_after_start)
+    try:
+        webview.start(debug=False, func=_after_start)
+    except Exception as error:
+        _report_start_failure(error)
+        raise SystemExit(1)
 
 
 # --- Comprobación del entorno (--check) ---------------------------------
@@ -437,9 +524,21 @@ def _check_gtk():
     try:
         import gi
 
+        gi.require_version("Gdk", "3.0")
         gi.require_version("Gtk", "3.0")
         gi.require_version("WebKit2", "4.1")
-        from gi.repository import GLib, Gtk, WebKit2
+        from gi.repository import Gdk, GLib, Gtk, WebKit2
+
+        # Por dónde salió la ventana de verdad, que es la mitad de la respuesta a
+        # cualquier cosa rara que se vea: el nombre de la clase de la pantalla es
+        # `X11Display` o `GdkWaylandDisplay`, y las dos rutas no se comportan
+        # igual (Wayland no sabe pedir una ventana sin decoración).
+        display_object = Gdk.Display.get_default()
+        backend = (
+            type(display_object).__name__.replace("Gdk", "").replace("Display", "").lower()
+            if display_object
+            else "?"
+        )
 
         print(f"  PyGObject  : {gi.__version__}")
         print(f"  GLib       : {GLib.MAJOR_VERSION}.{GLib.MINOR_VERSION}.{GLib.MICRO_VERSION}")
@@ -448,6 +547,7 @@ def _check_gtk():
             "  WebKitGTK  : "
             f"{WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()}"
         )
+        print(f"  sesión     : {_session_description()} — GDK dibuja por {backend}")
     except Exception as e:
         print(f"  FALLO al cargar GTK/WebKitGTK: {e}")
         print("RESULTADO: este sistema no tiene lo necesario para arrancar")
@@ -473,6 +573,78 @@ def _check_gtk():
 
     print(f"  pantalla   : {display[0]}={display[1]}")
     return _check_window()
+
+
+def _session_description():
+    """Cómo se llama esta sesión gráfica según el entorno."""
+    kind = os.environ.get("XDG_SESSION_TYPE") or "sin declarar"
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+    return f"{kind} ({desktop})" if desktop else kind
+
+
+def _x11_window_id(window):
+    """Identificador X de la ventana, o None si no hay ninguna (o no es X11)."""
+    native = getattr(window, "native", None)
+    gdk_window = native.get_window() if native is not None else None
+    identifier = getattr(gdk_window, "get_xid", None)
+    if gdk_window is None or not callable(identifier):
+        return None
+    try:
+        return identifier()
+    except Exception:
+        return None
+
+
+def _x11_property(identifier, name):
+    """Una propiedad de la ventana, leída con `xprop`.
+
+    Se usa `xprop` porque GDK no expone ninguna de las dos en GTK 3 —`GdkX11`
+    tiene el escritor del `WM_CLASS` y no el lector, y su `get_frame_extents`
+    devuelve el rectángulo entero de la ventana, no lo que se le añade—, y
+    `xprop` está en cualquier escritorio X11. Si no está, simplemente no se
+    informa.
+    """
+    try:
+        result = subprocess.run(
+            ["xprop", "-id", hex(identifier), name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or "=" not in result.stdout or "not found" in result.stdout:
+        return None
+    return result.stdout.split("=", 1)[1].strip()
+
+
+def _report_window_frame(window):
+    """Cuenta si el gestor de ventanas le puso marco, que es lo que decide si se ven dos barras.
+
+    La medida la publica el propio servidor X en `_NET_FRAME_EXTENTS`: si el
+    gestor no añade nada la propiedad no está, y la única barra es la del
+    launcher. Con decoración de verdad su valor es `4, 4, 30, 4`, que es el
+    control que confirma que la propiedad está diciendo algo y no que falte por
+    otro motivo.
+
+    El `WM_CLASS` es lo que asocia la ventana con su lanzador en el dock y en el
+    menú de ventanas: tiene que ser el mismo que el `StartupWMClass` del
+    `.desktop`.
+    """
+    identifier = _x11_window_id(window)
+    if identifier is None:
+        return
+    extents = _x11_property(identifier, "_NET_FRAME_EXTENTS")
+    # Cada gestor lo publica a su manera: KWin no pone la propiedad cuando no hay
+    # decoración y openbox la pone a ceros, así que las dos cosas se leen igual.
+    values = [int(value) for value in re.findall(r"-?\d+", extents or "")]
+    if not any(values):
+        print("  marco      : sin decoración del gestor de ventanas (una sola barra)")
+    else:
+        print(f"  marco      : {extents} ← el gestor añade decoración, se verán dos barras")
+    class_name = _x11_property(identifier, "WM_CLASS")
+    if class_name:
+        print(f"  WM_CLASS   : {class_name}")
 
 
 def _check_windows():
@@ -553,12 +725,23 @@ def _check_window():
     watchdog.daemon = True
     watchdog.start()
     try:
+        # La ventana se enseña, no se crea oculta: sin llegar a mostrarse el
+        # gestor de ventanas no la ve, y entonces no hay `_NET_FRAME_EXTENTS` que
+        # leer ni `WM_CLASS` que comprobar. Dura segundo y medio, y es lo que
+        # convierte esta comprobación en una medida de la ventana de verdad.
+        # `frameless` igual que la ventana real, para que la medida sea la suya.
         window = webview.create_window(
-            "Stella Client (check)", html="<html><body>ok</body></html>", hidden=True
+            "Stella Client (check)",
+            html="<html><body>ok</body></html>",
+            frameless=True,
         )
 
         def _close_after_start():
+            # Se espera a que la ventana esté de verdad en pantalla antes de
+            # medir: recién creada todavía no tiene ventana de GDK, y sin ella no
+            # hay nada que preguntarle al gestor.
             time.sleep(1.5)
+            _report_window_frame(window)
             window.destroy()
 
         webview.start(debug=False, func=_close_after_start)

@@ -1,3 +1,4 @@
+import ctypes
 import json
 import logging
 import os
@@ -65,6 +66,206 @@ def _ensure_glib():
             except (ImportError, ValueError):
                 continue
     return None
+
+# Los tiradores de redimensión que pinta la interfaz, traducidos a lo que entiende
+# GDK. Los nombres son los de `ui/app.js`: los cuatro bordes y las cuatro esquinas.
+_WINDOW_EDGES = {
+    "n": "NORTH",
+    "s": "SOUTH",
+    "e": "EAST",
+    "w": "WEST",
+    "ne": "NORTH_EAST",
+    "nw": "NORTH_WEST",
+    "se": "SOUTH_EAST",
+    "sw": "SOUTH_WEST",
+}
+
+
+def _gdk_button(button):
+    """Del número de botón del navegador al de GDK.
+
+    La página los cuenta desde cero —0 izquierdo, 1 central, 2 derecho— y X11
+    desde uno —1 izquierdo, 2 central, 3 derecho—. Pasar el 0 tal cual deja al
+    gestor de ventanas con un botón que no existe: no empieza el gesto y se queda
+    esperando la suelta de ese botón, de forma que el gesto a medias se come el
+    siguiente. El arrastre de la barra se libraba por casualidad; la redimensión
+    no arrancaba nunca.
+    """
+    try:
+        return int(button) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def _gtk_query(glib, function, default=None):
+    """Le pregunta algo a GTK desde el hilo de la página y espera la respuesta.
+
+    Las llamadas de la página —los métodos que expone `js_api`— pueden llegar en
+    otro hilo, y GTK no se puede tocar desde ahí: su estado interno se corrompe
+    (se ha visto terminar en un `corrupted double-linked list` de la libc, sin
+    más rastro que ese). Se encola en el bucle principal, que es donde GTK espera
+    que se le hable, y se espera aquí: son microsegundos, y sólo se usa para
+    preguntar o para una orden corta, nunca para llevar un gesto.
+    """
+    if glib.MainContext.default().is_owner():
+        try:
+            return function()
+        except Exception:
+            return default
+
+    result = {}
+    done = threading.Event()
+
+    def _run():
+        try:
+            result["value"] = function()
+        except Exception as error:
+            result["error"] = error
+        finally:
+            done.set()
+        return False  # no repetir
+
+    glib.idle_add(_run)
+    done.wait(2)
+    return result.get("value", default)
+
+
+# El gestor de ventanas escucha `_NET_WM_MOVERESIZE` en la ventana raíz, así que el
+# mensaje se manda ahí, con las dos máscaras del árbol de ventanas.
+_SUBSTRUCTURE_NOTIFY = 1 << 19
+_SUBSTRUCTURE_REDIRECT = 1 << 20
+_CLIENT_MESSAGE = 33
+_MOVERESIZE_MOVE = 8
+
+
+class _XClientMessage(ctypes.Structure):
+    """La parte de `XEvent` que usa el mensaje que entiende el gestor de ventanas."""
+
+    _fields_ = [
+        ("type", ctypes.c_int),
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),
+        ("display", ctypes.c_void_p),
+        ("window", ctypes.c_ulong),
+        ("message_type", ctypes.c_ulong),
+        ("format", ctypes.c_int),
+        ("data", ctypes.c_long * 5),
+    ]
+
+
+_x11 = None  # (libX11, conexión): se abre una vez, la primera que hace falta
+
+
+def _x11_connection():
+    """Conexión propia con el servidor X para hablar con el gestor de ventanas.
+
+    Va aparte de la de GDK a propósito: PyGObject no expone el puntero al `Display`
+    de GDK, y abrir otra conexión no cuesta nada (se abre una sola vez).
+    """
+    global _x11
+    if _x11 is None:
+        library = ctypes.CDLL("libX11.so.6")
+        library.XOpenDisplay.restype = ctypes.c_void_p
+        library.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        display = library.XOpenDisplay(None)
+        if not display:
+            logger.info("sin conexión con el servidor X para pedirle cosas al gestor")
+            return None
+        library.XDefaultRootWindow.restype = ctypes.c_ulong
+        library.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        library.XInternAtom.restype = ctypes.c_ulong
+        library.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        library.XSendEvent.restype = ctypes.c_int
+        library.XSendEvent.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_long,
+            ctypes.POINTER(_XClientMessage),
+        ]
+        library.XFlush.argtypes = [ctypes.c_void_p]
+        _x11 = (library, display)
+    return _x11
+
+
+def _request_wm_move(native, button, root_x, root_y, timestamp):
+    """Le pide al gestor de ventanas que empiece a mover la ventana. En X11.
+
+    No se usa `begin_move_drag` de GTK: necesita un «evento actual» para saber con
+    qué dispositivo arrastra, y esta orden llega del puente —ya fuera del manejador
+    del ratón—, así que se queda en nada sin decir nada. Medido con una ventana de
+    control: la misma llamada desde un manejador de pulsación mueve la ventana y
+    desde el bucle principal no la mueve ni un píxel, sin error ni aviso ninguno.
+
+    Lo que hace GTK por dentro es mandarle `_NET_WM_MOVERESIZE` al gestor de
+    ventanas; aquí se manda eso mismo, que no depende de ningún evento actual.
+    Devuelve False cuando no se puede (Wayland, sin libX11, sin servidor X) y quien
+    llama se queda con el camino de GTK.
+    """
+    try:
+        gdk_window = native.get_window()
+        identifier = gdk_window.get_xid() if gdk_window is not None else None
+        if not identifier:
+            return False
+        connection = _x11_connection()
+    except Exception as error:
+        logger.info(f"petición de mover sin X11: {error}")
+        return False
+    if connection is None:
+        return False
+
+    library, display = connection
+    try:
+        message = _XClientMessage()
+        message.type = _CLIENT_MESSAGE
+        message.display = display
+        message.window = int(identifier)
+        message.message_type = library.XInternAtom(display, b"_NET_WM_MOVERESIZE", False)
+        message.format = 32
+        message.data[0] = int(root_x)
+        message.data[1] = int(root_y)
+        message.data[2] = _MOVERESIZE_MOVE
+        message.data[3] = int(button)
+        message.data[4] = int(timestamp)
+        sent = library.XSendEvent(
+            display,
+            library.XDefaultRootWindow(display),
+            False,
+            _SUBSTRUCTURE_NOTIFY | _SUBSTRUCTURE_REDIRECT,
+            ctypes.byref(message),
+        )
+        library.XFlush(display)
+        return bool(sent)
+    except Exception as error:
+        logger.info(f"la petición de mover falló: {error}")
+        return False
+
+
+def _x11_event_time(native, fallback):
+    """Marca de tiempo del servidor X para las peticiones al gestor de ventanas.
+
+    Arrastrar y redimensionar una ventana sin bordes no se hace desde Python: se
+    le pide al gestor de ventanas (`_NET_WM_MOVERESIZE`) y él se queda con el
+    gesto, que es lo que evita que la ventana vaya a tirones por el puente. Esa
+    petición lleva una marca de tiempo del servidor X, y los gestores la comparan
+    con la última interacción del usuario para no dejar que una ventana se
+    coloque encima por sorpresa.
+
+    La que manda el navegador es un contador de milisegundos desde que se cargó
+    la página, no una marca del servidor, así que se pide una de verdad —una ida
+    y vuelta con el servidor, una sola vez por gesto— y sólo si eso no está
+    disponible (Wayland, o un servidor que no contesta) se usa la del navegador.
+    """
+    try:
+        import gi
+
+        gi.require_version("GdkX11", "3.0")
+        from gi.repository import GdkX11
+
+        gdk_window = native.get_window()
+        if gdk_window is None:
+            return int(fallback)
+        return int(GdkX11.x11_get_server_time(gdk_window)) or int(fallback)
+    except Exception:
+        return int(fallback)
+
 
 def _copy_to_clipboard_gtk(text):
     """Portapapeles en Linux: GTK, encolando en el hilo principal si hace falta."""
@@ -656,13 +857,15 @@ class API:
                 winwindow.maximize(self._window)
                 return {"ok": True, "maximized": True}
 
-            native = getattr(self._window, 'native', None)
-            if native is not None and hasattr(native, 'is_maximized'):
-                self._maximized = bool(native.is_maximized())
+            glib = _ensure_glib()
+            native = getattr(self._window, "native", None)
+            if native is not None and hasattr(native, "is_maximized") and glib:
+                self._maximized = bool(_gtk_query(glib, native.is_maximized, False))
+
             if self._maximized:
-                self._window.restore()
+                self._restore_gtk(glib, native)
             else:
-                self._window.maximize()
+                self._maximize_gtk(glib, native)
             self._maximized = not self._maximized
             return {"ok": True, "maximized": self._maximized}
         except Exception as e:
@@ -695,6 +898,9 @@ class API:
         en los dos casos se delega en él a propósito: mover la ventana desde
         Python obligaría a un viaje de ida y vuelta por cada movimiento del ratón
         —navegador, puente, Python, ventana— y el arrastre se ve a tirones.
+
+        `button` llega tal cual desde el evento de la página, que cuenta los
+        botones desde cero (ver `_gdk_button`).
         """
         if not hasattr(self, '_window') or not self._window:
             return {"ok": False}
@@ -708,10 +914,29 @@ class API:
             return {"ok": False}
         try:
             native = self._window.native
-            if native:
-                glib.idle_add(lambda: native.begin_move_drag(int(button), int(root_x), int(root_y), int(timestamp)))
-        except Exception:
-            pass
+            if not native:
+                return {"ok": False}
+        except Exception as e:
+            logger.info(f"begin_window_move falló: {e}")
+            return {"ok": False}
+
+        # Igual que en la redimensión: todo dentro del hilo de GTK. La marca de
+        # tiempo del servidor X también es una llamada a GDK, así que va aquí.
+        def _move():
+            marca = _x11_event_time(native, timestamp)
+            # En X11 se le pide al gestor nosotros mismos: el `begin_move_drag` de
+            # GTK no hace nada sin un evento actual (ver `_request_wm_move`).
+            if _request_wm_move(native, _gdk_button(button), root_x, root_y, marca):
+                return False
+            native.begin_move_drag(
+                _gdk_button(button),
+                int(root_x),
+                int(root_y),
+                marca,
+            )
+            return False
+
+        glib.idle_add(_move)
         return {"ok": True}
 
     def _begin_window_move_windows(self):
@@ -758,6 +983,107 @@ class API:
         except Exception as e:
             logger.info(f"begin_window_move en Windows falló: {e}")
             return {"ok": False}
+
+    def begin_window_resize(self, edge, button, root_x, root_y, timestamp):
+        """Redimensiona la ventana desde los tiradores de la interfaz (Linux).
+
+        La ventana no tiene marco —ni el suyo ni el del sistema—, así que sus
+        bordes no se pueden agarrar: en X11 el gestor de ventanas no dibuja nada
+        alrededor (medido: sin `_NET_FRAME_EXTENTS`), y eso es lo mismo que hace
+        que la barra de título salga una sola vez. El precio es que
+        redimensionar hay que pedirlo, y se le pide al gestor, que es quien sabe
+        hacerlo sin tirones: la interfaz manda el borde o la esquina y el gestor
+        lleva el gesto, igual que en el arrastre de la barra.
+
+        `window_state()` publica si esto está disponible. Donde no lo está no se
+        pintan tiradores, en vez de dejar zonas que no hacen nada.
+        """
+        if not hasattr(self, "_window") or not self._window:
+            return {"ok": False}
+        if paths.is_windows():
+            return {"ok": False, "error": "no implementado en Windows"}
+        return self._begin_window_resize_gtk(edge, button, root_x, root_y, timestamp)
+
+    def _begin_window_resize_gtk(self, edge, button, root_x, root_y, timestamp):
+        glib = _ensure_glib()
+        if not glib:
+            return {"ok": False}
+        try:
+            import gi
+
+            gi.require_version("Gdk", "3.0")
+            from gi.repository import Gdk
+
+            direction = _WINDOW_EDGES.get(str(edge).lower())
+            if direction is None:
+                return {"ok": False, "error": f"borde desconocido: {edge}"}
+            native = self._window.native
+            if not native:
+                return {"ok": False}
+            gdk_edge = getattr(Gdk.WindowEdge, direction)
+        except Exception as e:
+            logger.info(f"begin_window_resize falló: {e}")
+            return {"ok": False, "error": str(e)}
+
+        # El gesto entero se prepara dentro del hilo de GTK: la marca de tiempo
+        # del servidor X es una llamada a GDK y tampoco se puede hacer desde el
+        # hilo de la página.
+        def _resize():
+            native.begin_resize_drag(
+                gdk_edge,
+                _gdk_button(button),
+                int(root_x),
+                int(root_y),
+                _x11_event_time(native, timestamp),
+            )
+            return False
+
+        glib.idle_add(_resize)
+        return {"ok": True}
+
+    def _maximize_gtk(self, glib, native):
+        """Maximiza la ventana en Linux."""
+        if native is not None and hasattr(native, "maximize") and glib:
+            _gtk_query(glib, native.maximize)
+        else:
+            self._window.maximize()
+
+    def _restore_gtk(self, glib, native):
+        """Devuelve la ventana a su tamaño de antes de maximizar.
+
+        No se usa `window.restore()` de pywebview: en GTK sólo hace `deiconify()`
+        y `present()`, así que una ventana maximizada se queda maximizada y el
+        botón □ no haría nada —lo que deja al launcher sin forma de volver a su
+        tamaño normal, y sin ventana normal no hay nada que redimensionar—. La
+        orden que desmaximiza es `unmaximize()` de la propia ventana GTK.
+        """
+        if native is not None and hasattr(native, "unmaximize") and glib:
+            _gtk_query(glib, native.unmaximize)
+        else:
+            self._window.restore()
+
+    def window_state(self):
+        """Si la ventana está maximizada y si se puede redimensionar por los bordes.
+
+        Lo primero lo pregunta la interfaz para esconder los tiradores con la
+        ventana maximizada, y se le pregunta al sistema en vez de llevarlo por
+        nuestra cuenta: la ventana también se maximiza con doble clic en su barra,
+        desde el menú del gestor o con un atajo del escritorio, y nada de eso pasa
+        por aquí.
+        """
+        state = {"maximized": False, "resizable": not paths.is_windows()}
+        if not hasattr(self, "_window") or not self._window:
+            return state
+        try:
+            native = getattr(self._window, "native", None)
+            glib = _ensure_glib()
+            if native is not None and hasattr(native, "is_maximized") and glib:
+                state["maximized"] = bool(_gtk_query(glib, native.is_maximized, False))
+            else:
+                state["maximized"] = bool(getattr(self, "_maximized", False))
+        except Exception as e:
+            logger.info(f"window_state falló: {e}")
+        return state
 
     def _ensure_mods_env(self):
         os.environ.pop("STELLA_MODS_DIR", None)

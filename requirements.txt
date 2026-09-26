@@ -6,4 +6,14 @@ pypresence>=4.6
 # PyGObject no publica ruedas en PyPI para Windows y allí tampoco se usa: la
 # ventana la dibuja el motor de Edge y no GTK. Sin esta marca, `pip install -r
 # requirements.txt` falla en Windows en vez de instalar lo demás.
-PyGObject>=3.48; sys_platform == "linux"
+#
+# El tope de 3.54 no es un capricho. Desde la 3.54 PyGObject llama a
+# `gi_repository_dup_default()`, que libgirepository-2.0 sólo exporta a partir
+# de la 2.86 —la documentación de GIRepository lo fecha como «since 2.86»—.
+# Ubuntu 24.04 trae la 2.80, así que el payload salía pidiendo un símbolo que
+# allí no existe y el launcher moría al arrancar con `undefined symbol:
+# gi_repository_dup_default`. La 3.52.4 monta su repositorio con
+# `gi_repository_new()`, que existe desde la 2.80, y es la última que respeta
+# el suelo que declaran los paquetes. `packaging/audit_symbols.py` comprueba en
+# cada build que esto siga siendo así.
+PyGObject>=3.48,<3.54; sys_platform == "linux"

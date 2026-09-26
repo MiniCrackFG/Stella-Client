@@ -6,9 +6,10 @@
 #
 # - `AutoReqProv: no` en el spec, porque si no rpmbuild pide los .so que el
 #   propio paquete lleva dentro y el RPM queda ininstalable.
-# - Las dependencias van por soname y por nombre de typelib (`libgtk-3.so.0()(64bit)`,
-#   `typelib(WebKit2) = 4.1`), que son provided reales en Fedora, RHEL y openSUSE.
-#   Así no hay que traducir nombres de paquete entre familias.
+# - Las dependencias van por soname (`libgtk-3.so.0()(64bit)`,
+#   `libwebkit2gtk-4.1.so.0()(64bit)`), que es lo único que direccionan igual Fedora,
+#   RHEL y openSUSE. NO por `typelib(...)` (provided sólo de openSUSE, que hace
+#   abortar a dnf en Fedora) ni por nombre de paquete, que cambia por familia.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

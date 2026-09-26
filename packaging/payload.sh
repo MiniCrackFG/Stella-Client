@@ -46,3 +46,9 @@ awk -v b="$before" -v a="$after" 'BEGIN { printf "    símbolos: %.0f MB menos (
 
 echo "    $OUT/stella-client"
 "$PY" "$HERE/audit_libs.py" "$OUT/stella-client"
+
+# Qué pide el payload y qué existe de verdad en Ubuntu 24.04. La 0.2.1 se publicó
+# con un `import gi` que no podía funcionar allí por un símbolo (`import` que
+# pedía GLib 2.86): el payload se había comprobado sólo en la máquina donde se
+# construyó. Esta comprobación es la que faltaba.
+"$PY" "$HERE/audit_symbols.py" "$OUT/stella-client"
